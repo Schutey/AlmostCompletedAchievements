@@ -1,0 +1,10 @@
+## Interface: 110200
+## Title: Almost Completed Achievements
+## Notes: Highlights achievements that are nearly complete
+## Author: Schutey
+## Version: 1.0
+
+## SavedVariables: ACA_ScanThreshold
+
+AlmostCompletedAchievements.lua
+
