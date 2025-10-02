@@ -14,6 +14,11 @@ local hasScannedThisSession = false
 -- Ensure Blizzard's Achievement UI is loaded
 UIParentLoadAddOn("Blizzard_AchievementUI")
 
+-- SavedVariable for blacklisted achievement IDs
+if not ACA_Blacklist then
+    ACA_Blacklist = {}
+end
+
 -- Helper: Calculate completion percentage for an achievement
 local function GetCompletionPercent(achievementID)
     local numCriteria = GetAchievementNumCriteria(achievementID)
@@ -48,15 +53,18 @@ local function ScanAchievements(callback, updateProgress)
             if currentAchievement <= numAchievements then
                 local achievementID = select(1, GetAchievementInfo(categoryID, currentAchievement))
                 if achievementID then
-                    local _, name, _, completed = GetAchievementInfo(achievementID)
-                    if not completed then
-                        local percent = GetCompletionPercent(achievementID)
-                        if percent >= ACA_ScanThreshold then
-                            table.insert(results, {
-                                id = achievementID,
-                                name = name,
-                                percent = percent
-                            })
+                    -- Skip blacklisted achievements
+                    if not ACA_Blacklist[achievementID] then
+                        local _, name, _, completed = GetAchievementInfo(achievementID)
+                        if not completed then
+                            local percent = GetCompletionPercent(achievementID)
+                            if percent >= ACA_ScanThreshold then
+                                table.insert(results, {
+                                    id = achievementID,
+                                    name = name,
+                                    percent = percent
+                                })
+                            end
                         end
                     end
                 end
@@ -215,6 +223,74 @@ local function CreateAlmostCompletedPanel()
     panel.refreshButton:Hide()
 end
 
+-- Helper to create achievement row with a button and X button
+local function CreateAchievementRow(parent, ach, yOffset, blacklistCallback)
+    local rowWidth = 292 -- leave room for X button
+    local rowHeight = 24
+
+    -- Achievement button
+    local button = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+    button:SetSize(rowWidth, rowHeight)
+    button:SetPoint("TOPLEFT", parent, "TOPLEFT", 10, yOffset)
+    button:SetText(string.format("%.0f%% - %s", ach.percent, ach.name))
+    button:SetScript("OnClick", function()
+        AchievementFrame_SelectAchievement(ach.id)
+    end)
+    button:SetNormalFontObject("GameFontNormal")
+    button:SetHighlightFontObject("GameFontHighlight")
+
+    -- X button (Blacklist)
+    local xButton = CreateFrame("Button", nil, parent)
+    xButton:SetSize(20, 20)
+    xButton:SetPoint("LEFT", button, "RIGHT", 4, 0)
+    xButton:SetNormalTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Up")
+    xButton:SetPushedTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Down")
+    xButton:SetHighlightTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Highlight")
+    xButton:SetScript("OnClick", function()
+        blacklistCallback(ach.id)
+    end)
+    xButton:SetMotionScriptsWhileDisabled(true)
+
+    -- Tooltip for X button
+    xButton:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Blacklist this achievement from future scans.\nUse /acareset to reset the blacklist.", nil, nil, nil, nil, true)
+        GameTooltip:Show()
+    end)
+    xButton:SetScript("OnLeave", function()
+        GameTooltip:Hide()
+    end)
+end
+
+-- Blacklist helper
+local function BlacklistAchievement(achievementID)
+    ACA_Blacklist[achievementID] = true
+    -- Remove the achievement from the current visible list without triggering a new scan
+    if AlmostCompletedPanel and AlmostCompletedPanel._currentAchievements then
+        for i, ach in ipairs(AlmostCompletedPanel._currentAchievements) do
+            if ach.id == achievementID then
+                table.remove(AlmostCompletedPanel._currentAchievements, i)
+                break
+            end
+        end
+        -- Refresh the visible list only
+        local panel = AlmostCompletedPanel
+        local content = panel.content
+        -- Clear previous rows
+        for _, child in ipairs({ content:GetChildren() }) do
+            child:Hide()
+            child:SetParent(nil)
+        end
+        -- Recreate achievement rows
+        local yOffset = -10
+        for _, ach in ipairs(panel._currentAchievements) do
+            CreateAchievementRow(content, ach, yOffset, BlacklistAchievement)
+            yOffset = yOffset - 28
+        end
+        content:SetHeight(#panel._currentAchievements * 28 + 50)
+    end
+end
+
 -- Update the panel with scanned achievements
 function UpdateAlmostCompletedPanel()
     if not AlmostCompletedPanel then return end
@@ -235,7 +311,7 @@ function UpdateAlmostCompletedPanel()
         return
     end
 
-    -- Clear previous buttons
+    -- Clear previous rows
     for _, child in ipairs({ content:GetChildren() }) do
         child:Hide()
         child:SetParent(nil)
@@ -263,20 +339,16 @@ function UpdateAlmostCompletedPanel()
         refreshButton:Show()
         sliderContainer:Show()
 
-        -- Create achievement buttons
+        -- Save current achievements for blacklist removal
+        panel._currentAchievements = nudges
+
+        -- Create achievement rows
         local yOffset = -10
         for _, ach in ipairs(nudges) do
-            local button = CreateFrame("Button", nil, content, "UIPanelButtonTemplate")
-            button:SetSize(320, 24)
-            button:SetPoint("TOPLEFT", content, "TOPLEFT", 10, yOffset)
-            button:SetText(string.format("%.0f%% - %s", ach.percent, ach.name))
-            button:SetScript("OnClick", function()
-                AchievementFrame_SelectAchievement(ach.id)
-            end)
+            CreateAchievementRow(content, ach, yOffset, BlacklistAchievement)
             yOffset = yOffset - 28
         end
 
-        -- Update content height with padding
         content:SetHeight(#nudges * 28 + 50)
     end,
     function(categoryIndex, achievementIndex)
@@ -319,4 +391,14 @@ SlashCmdList["ALMOSTCOMPLETED"] = function()
     end
     UpdateAlmostCompletedPanel()
     AlmostCompletedPanel:Show()
+end
+
+-- Slash command to reset blacklist
+SLASH_ACARESET1 = "/acareset"
+SlashCmdList["ACARESET"] = function()
+    ACA_Blacklist = {}
+    print("Almost Completed Achievements: Blacklist cleared.")
+    if AlmostCompletedPanel then
+        UpdateAlmostCompletedPanel()
+    end
 end
