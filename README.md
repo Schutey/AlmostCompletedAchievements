@@ -23,8 +23,7 @@ This addon highlights achievements that are nearly complete, helping you focus o
 - MoP Classic (Interface: 50501)
 
 ## Authors
-Schutey
-Kagrok
+Schutey & Kagrok
 
 ## Version 1.2:
 - Added achievement blacklist feature (X button)
