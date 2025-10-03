@@ -509,39 +509,46 @@ end
 ----------------------------------------
 local loader = CreateFrame("Frame")
 loader:RegisterEvent("ADDON_LOADED")
-loader:RegisterEvent("PLAYER_ENTERING_WORLD")
 loader:SetScript("OnEvent", function(self, event, arg1)
     if event == "ADDON_LOADED" and arg1 == ADDON_NAME then
         ACA_ScanThreshold   = ACA_ScanThreshold or ACA.DEFAULT_THRESHOLD
         ACA_Cache           = ACA_Cache or {}
         ACA_IgnoreList      = ACA_IgnoreList or {}
         ACA_FilterMode      = ACA_FilterMode or "All"
-		if ACA_Blacklist and type(ACA_Blacklist)=="table" then
-        for id,_ in pairs(ACA_Blacklist) do
-            ACA_IgnoreList[tonumber(id)] = true
+        if ACA_Blacklist and type(ACA_Blacklist)=="table" then
+            for id in pairs(ACA_Blacklist) do
+                ACA_IgnoreList[tonumber(id)] = true
+            end
+            print("ACA: imported "..#(ACA_Blacklist).." entries from old blacklist.")
+            ACA_Blacklist = nil
         end
-        print("ACA: imported "..#(ACA_Blacklist).." entries from old blacklist.")
-        ACA_Blacklist = nil        -- wipe the old table
+        CreateAlmostCompletedPanel()      -- create our frame (starts hidden)
+
+    elseif event == "ADDON_LOADED" and arg1 == "Blizzard_AchievementUI" then
+        -- Blizzard achievement window now exists; hook its OnShow
+        AchievementFrame:HookScript("OnShow", function()
+            local p = _G[ACA_PANEL_NAME]
+            if p then
+                p:Show()
+                PanelTemplates_SetTab(p, 1)
+                ACA.UpdatePanel(true)   -- automatic scan (remove this line if you add a toggle later)
+            end
+        end)
     end
-        CreateAlmostCompletedPanel()
-    elseif event == "PLAYER_ENTERING_WORLD" then
-        if _G["AchievementFrame"] and not _G["AchievementFrame"]._acaHooked then
-            _G["AchievementFrame"]._acaHooked = true
-            _G["AchievementFrame"]:HookScript("OnShow", function()
-                C_Timer.After(0.3, function()
-                    local p = CreateAlmostCompletedPanel()
-                    if p then p:Show(); PanelTemplates_SetTab(p, 1) end
-                    if not hasScannedThisSession then
-                        hasScannedThisSession = false
-                        C_Timer.After(0.4, function()
-						local p = _G[ACA_PANEL_NAME]
-						if p then p:Show() end
-						end)
-                    end
-                end)
-            end)
+end)
+
+--------------------------------------------------
+-- auto-show once after login if user wants it
+--------------------------------------------------
+local login = CreateFrame("Frame")
+login:RegisterEvent("PLAYER_ENTERING_WORLD")
+login:SetScript("OnEvent", function(_, _)
+    login:UnregisterEvent("PLAYER_ENTERING_WORLD")   -- only once
+    C_Timer.After(3, function()                      -- give every UI piece time
+        if not AchievementFrame or not AchievementFrame:IsShown() then
+            SlashCmdList["ALMOSTCOMPLETED"]()        -- same as typing /aca
         end
-    end
+    end)
 end)
 
 SLASH_ALMOSTCOMPLETED1 = "/aca"
