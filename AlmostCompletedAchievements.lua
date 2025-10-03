@@ -1,381 +1,542 @@
--- ==========================================
--- Almost Completed Achievements Addon
--- Highlights achievements that are nearly complete
--- ==========================================
+--------------------------------------------------------------------------------
+-- AlmostCompletedAchievements
+-- v1.3  –  Reward-filter edition
+--  reward filter dropdown 
+--------------------------------------------------------------------------------
+local ADDON_NAME, ACA = "AlmostCompletedAchievements", {}
+_G[ADDON_NAME] = ACA
 
--- Default scan threshold (percent complete)
-if not ACA_ScanThreshold then
-    ACA_ScanThreshold = 80
+----------------------------------------
+-- 1.  Saved-variables
+----------------------------------------
+ACA_ScanThreshold   = ACA_ScanThreshold or 80
+ACA_Cache           = ACA_Cache or {}
+ACA_IgnoreList      = ACA_IgnoreList or {}
+ACA_FilterMode      = ACA_FilterMode or "All"  
+
+----------------------------------------
+-- 2.  Locals & API caches
+----------------------------------------
+local C_Timer, CreateFrame = C_Timer, CreateFrame
+local ipairs, pairs, tonumber, tostring, select = ipairs, pairs, tonumber, tostring, select
+local floor, sort, format = math.floor, table.sort, string.format
+local GetAchievementInfo = GetAchievementInfo
+local GetAchievementNumCriteria = GetAchievementNumCriteria
+local GetAchievementCriteriaInfo = GetAchievementCriteriaInfo
+local GetCategoryList, GetCategoryNumAchievements = GetCategoryList, GetCategoryNumAchievements
+local UIParentLoadAddOn = UIParentLoadAddOn
+
+----------------------------------------
+-- 3.  Constants
+----------------------------------------
+ACA.BATCH_SIZE      = 20
+ACA.SCAN_DELAY      = 0.02
+ACA.SLIDER_MIN      = 50
+ACA.SLIDER_MAX      = 100
+ACA.DEFAULT_THRESHOLD = 80
+ACA.CACHE_TTL       = 60 * 5
+ACA_PANEL_NAME      = "AlmostCompletedPanel"
+ACA.ROW_HEIGHT      = 44
+
+----------------------------------------
+-- 4.  Reward-filter tables 
+----------------------------------------
+local FILTERS = {
+    ["All"]                 = function(r) return true end,
+    ["Any reward"]          = function(r) return r ~= "" end,
+    ["Mount"]               = function(r) return r:find("Mount") end,
+    ["Title"]               = function(r) return r:find("Title") end,
+    ["Appearance"]          = function(r) return r:find("Appearance") end,
+    ["Drake Customization"] = function(r) return r:find("Drake Customization") end,
+    ["Pet"]                 = function(r) return r:find("Pet") end,
+    ["Warband Campsite"]    = function(r) return r:find("Campsite") end,
+    ["Other"]               = function(r)
+        if r == "" then return false end
+        return not (r:find("Mount") or r:find("Title") or r:find("Appearance") or
+                    r:find("Drake Customization") or r:find("Pet") or r:find("Campsite"))
+    end,
+}
+local FILTER_LIST = {
+    "All", "Any reward", "Mount", "Title", "Appearance",
+    "Drake Customization", "Pet", "Warband Campsite", "Other"
+}
+
+----------------------------------------
+-- 5.  Helpers
+----------------------------------------
+local function SafeGetCategoryList()
+    local t = GetCategoryList() or {}
+    return type(t) == "table" and t or {}
 end
 
--- Track whether we've scanned achievements this session
-local hasScannedThisSession = false
-
--- Ensure Blizzard's Achievement UI is loaded
-UIParentLoadAddOn("Blizzard_AchievementUI")
-
--- SavedVariable for blacklisted achievement IDs
-if not ACA_Blacklist then
-    ACA_Blacklist = {}
-end
-
--- Helper: Calculate completion percentage for an achievement
-local function GetCompletionPercent(achievementID)
-    local numCriteria = GetAchievementNumCriteria(achievementID)
-    if not numCriteria or numCriteria == 0 then return 0 end
-
-    local completed = 0
-    for i = 1, numCriteria do
-        local _, _, done = GetAchievementCriteriaInfo(achievementID, i)
-        if done then
-            completed = completed + 1
+local function GetCompletionPercent(achID)
+    local num = GetAchievementNumCriteria(achID)
+    if not num or num == 0 then return 0 end
+    local done = 0
+    for i = 1, num do
+        local _, _, completed, qty, req = GetAchievementCriteriaInfo(achID, i)
+        if completed then
+            done = done + 1
+        elseif qty and req and req > 0 then
+            done = done + (qty / req)
         end
     end
-
-    return (completed / numCriteria) * 100
+    return (done / num) * 100
 end
 
--- Achievement Scanner: scans all achievements and filters by threshold
-local function ScanAchievements(callback, updateProgress)
-    local results = {}
-    local categories = GetCategoryList()
-    local currentCategory = 1
-    local currentAchievement = 1
-    local batchSize = 20
+local function GetCachedResultsForThreshold(th)
+    local e = ACA_Cache[tostring(th)]
+    return (e and (time() - (e.timestamp or 0)) <= ACA.CACHE_TTL) and e.results or nil
+end
 
-    local function scanStep()
-        local scanned = 0
+local function StoreCacheForThreshold(th, res)
+    ACA_Cache[tostring(th)] = { results = res, timestamp = time() }
+end
 
-        while currentCategory <= #categories and scanned < batchSize do
-            local categoryID = categories[currentCategory]
-            local numAchievements = GetCategoryNumAchievements(categoryID)
+----------------------------------------
+-- 6.  Row pool 
+----------------------------------------
+local rowPool = {}
+local function AcquireRow(parent)
+    local row = table.remove(rowPool)
+    if row and row:GetParent() ~= parent then row:SetParent(parent) end
+    if row then row:Show(); return row end
 
-            if currentAchievement <= numAchievements then
-                local achievementID = select(1, GetAchievementInfo(categoryID, currentAchievement))
-                if achievementID then
-                    -- Skip blacklisted achievements
-                    if not ACA_Blacklist[achievementID] then
-                        local _, name, _, completed = GetAchievementInfo(achievementID)
+    local f = CreateFrame("Button", nil, parent, "BackdropTemplate")
+    f:SetSize(360, ACA.ROW_HEIGHT)
+
+    f.bg = f:CreateTexture(nil, "BACKGROUND")
+    f.bg:SetAllPoints()
+    f.bg:SetColorTexture(0, 0, 0, 0.4)
+
+    f.highlight = f:CreateTexture(nil, "HIGHLIGHT")
+    f.highlight:SetAllPoints()
+    f.highlight:SetTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
+    f.highlight:SetBlendMode("ADD")
+    f.highlight:SetAlpha(0.25)
+
+    f.Icon = f:CreateTexture(nil, "ARTWORK")
+    f.Icon:SetSize(36, 36)
+    f.Icon:SetPoint("LEFT", f, "LEFT", 4, 0)
+
+    f.Name = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    f.Name:SetPoint("LEFT", f.Icon, "RIGHT", 8, 6)
+    f.Name:SetJustifyH("LEFT")
+    f.Name:SetWidth(220)
+
+    -- NEW: percent label under the name
+    f.Label = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.Label:SetPoint("TOPLEFT", f.Icon, "TOPRIGHT", 8, -18)
+    f.Label:SetJustifyH("LEFT")
+    f.Label:SetWidth(220)
+
+    f._ignoreButton = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    f._ignoreButton:SetSize(24, 20)
+    f._ignoreButton:SetPoint("RIGHT", f, "RIGHT", -6, 0)
+
+    f.Reward = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    f.Reward:SetPoint("RIGHT", f._ignoreButton, "LEFT", -8, 0)
+    f.Reward:SetJustifyH("RIGHT")
+    f.Reward:SetWidth(160)
+    f.Reward:SetWordWrap(false)
+
+    return f
+end
+
+local function ReleaseRow(row)
+    if not row then return end
+    row:Hide(); row:SetParent(nil)
+    row:SetScript("OnEnter", nil); row:SetScript("OnLeave", nil); row:SetScript("OnClick", nil)
+    if row._ignoreButton then row._ignoreButton:SetScript("OnClick", nil) end
+    table.insert(rowPool, row)
+end
+
+local function TruncateString(s, max)
+    if not s or #s <= max then return s or "" end
+    return s:sub(1, max - 3) .. "..."
+end
+
+----------------------------------------
+-- 7.  Populate row
+----------------------------------------
+function ACA:PopulateNativeRow(row, ach)
+    row.Icon:SetTexture(ach.icon or 134400)
+    row.Name:SetText(ach.name or ("[" .. tostring(ach.id) .. "]"))
+
+    -- reward text
+    local _, _, _, _, _, _, _, _, _, _, rewardText = GetAchievementInfo(ach.id)
+    if not rewardText then
+        local all = { GetAchievementInfo(ach.id) }
+        rewardText = all[11] or all[12] or all[13] or ""
+    end
+    row.Reward:SetText(TruncateString(rewardText, 36))
+
+    -- percent under the name
+    row.Label:SetText(format("%.0f%%", ach.percent))
+
+    -- scripts
+    row:SetScript("OnEnter", function(self)
+        UIParentLoadAddOn("Blizzard_AchievementUI")
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        if GameTooltip.SetAchievementByID then
+            GameTooltip:SetAchievementByID(ach.id)
+        else
+            GameTooltip:ClearLines()
+            GameTooltip:AddLine(ach.name or "[" .. tostring(ach.id) .. "]")
+        end
+        local numC = GetAchievementNumCriteria(ach.id) or 0
+        if numC > 0 then
+            GameTooltip:AddLine(" ")
+            GameTooltip:AddDoubleLine("Your progress:", format("%d / %d (%.0f%%)", floor((ach.percent / 100) * numC + 0.5), numC, ach.percent), 1, 1, 1, 1, 1, 1)
+        end
+        if rewardText and rewardText ~= "" then
+            GameTooltip:AddLine(" ")
+            GameTooltip:AddLine("Reward: " .. rewardText, 1, 1, 1)
+        end
+        GameTooltip:Show()
+    end)
+    row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    row:SetScript("OnClick", function()
+        UIParentLoadAddOn("Blizzard_AchievementUI")
+        local AF = _G["AchievementFrame"]
+        if AF then AF:Show() end
+        local selectFn = _G["AchievementFrame_SelectAchievement"]
+        if type(selectFn) == "function" then
+            selectFn(ach.id)
+        else
+            print("ACA: Could not select achievement, open and search manually.")
+        end
+    end)
+
+    row._ignoreButton:SetScript("OnClick", function()
+        ACA_IgnoreList[tonumber(ach.id)] = (not ACA_IgnoreList[tonumber(ach.id)]) or nil
+        print(format("ACA: %s %s", ACA_IgnoreList[tonumber(ach.id)] and "Ignored" or "Unignored", ach.name or ach.id))
+        ACA_Cache = {}
+        ACA.UpdatePanel(true)
+    end)
+    row._ignoreButton:SetText(ACA_IgnoreList[tonumber(ach.id)] and "✓" or "X")
+end
+
+----------------------------------------
+-- 8.  Scanner (batched)
+----------------------------------------
+local hasScannedThisSession = false
+local pendingSliderRescanCancel = nil
+
+local function ScanAchievements(onComplete, onProgress)
+    C_Timer.After(0, function()
+        local results, categories = {}, SafeGetCategoryList()
+        local totalCategories = #categories
+        local currentCat, currentAch = 1, 1
+        local scanned, totalToScan = 0, 0
+        local threshold = ACA_ScanThreshold or ACA.DEFAULT_THRESHOLD
+
+        for ci = 1, totalCategories do
+            totalToScan = totalToScan + (GetCategoryNumAchievements(categories[ci]) or 0)
+        end
+
+        local function step()
+            local processed = 0
+            while currentCat <= totalCategories and processed < ACA.BATCH_SIZE do
+                local catID = categories[currentCat]
+                local numAch = GetCategoryNumAchievements(catID) or 0
+                if currentAch <= numAch then
+                    local achID = select(1, GetAchievementInfo(catID, currentAch))
+                    if achID and not ACA_IgnoreList[tonumber(achID)] then
+                        local _, name, _, completed, _, _, _, _, _, icon = GetAchievementInfo(achID)
                         if not completed then
-                            local percent = GetCompletionPercent(achievementID)
-                            if percent >= ACA_ScanThreshold then
+                            local percent = GetCompletionPercent(achID)
+                            if percent >= threshold then
+                                local _, _, _, _, _, _, _, _, _, _, rewardText = GetAchievementInfo(achID)
+                                if not rewardText then
+                                    local all = { GetAchievementInfo(achID) }
+                                    rewardText = all[11] or all[12] or all[13] or ""
+                                end
                                 table.insert(results, {
-                                    id = achievementID,
-                                    name = name,
-                                    percent = percent
+                                    id = achID, name = name or "[" .. tostring(achID) .. "]",
+                                    percent = percent, category = catID, icon = icon, reward = rewardText
                                 })
                             end
                         end
                     end
+                    currentAch = currentAch + 1
+                    scanned, processed = scanned + 1, processed + 1
+                    if onProgress then onProgress(scanned, totalToScan) end
+                else
+                    currentCat, currentAch = currentCat + 1, 1
                 end
-                currentAchievement = currentAchievement + 1
-                scanned = scanned + 1
+            end
 
-                if updateProgress then
-                    updateProgress(currentCategory, currentAchievement)
+            if currentCat > totalCategories then
+                local filtered = {}
+                local filtFn = FILTERS[ACA_FilterMode] or FILTERS["All"]
+                for _, v in ipairs(results) do
+                    if filtFn(v.reward or "") then table.insert(filtered, v) end
                 end
+                sort(filtered, function(a, b) return a.percent > b.percent end)
+                if onComplete then onComplete(filtered) end
             else
-                currentCategory = currentCategory + 1
-                currentAchievement = 1
+                C_Timer.After(ACA.SCAN_DELAY, step)
             end
         end
-
-        if currentCategory > #categories then
-            table.sort(results, function(a, b) return a.percent > b.percent end)
-            callback(results)
-        else
-            C_Timer.After(0.01, scanStep)
-        end
-    end
-
-    scanStep()
+        step()
+    end)
 end
 
--- Create the floating panel beside the Achievement UI
+----------------------------------------
+-- 9.  Panel creation
+----------------------------------------
 local function CreateAlmostCompletedPanel()
-    if AlmostCompletedPanel then return end
+    if _G[ACA_PANEL_NAME] then return _G[ACA_PANEL_NAME] end
+    UIParentLoadAddOn("Blizzard_AchievementUI")
+    local parent = _G["AchievementFrame"] or UIParent
 
-    -- Create main panel and assign immediately to global
-    local panel = CreateFrame("Frame", "AlmostCompletedPanel", AchievementFrame, "BackdropTemplate")
-    AlmostCompletedPanel = panel
-
-    panel:SetSize(360, 500)
-    panel:SetPoint("TOPLEFT", AchievementFrame, "TOPRIGHT", 10, 0)
+    local panel = CreateFrame("Frame", ACA_PANEL_NAME, parent, "BackdropTemplate")
+    panel:SetSize(420, 520)
+    panel:SetPoint("TOPLEFT", parent, "TOPRIGHT", 10, 0)
     panel:SetBackdrop({
         bgFile = "Interface\\AchievementFrame\\UI-Achievement-Parchment-Horizontal",
         edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
         tile = false, edgeSize = 16,
         insets = { left = 4, right = 4, top = 4, bottom = 4 }
     })
+    panel:SetBackdropBorderColor(0.2, 0.15, 0.1)
+    panel:Hide()
 
-    -- Title header
-    local titleFrame = CreateFrame("Frame", nil, panel, "BackdropTemplate")
-    titleFrame:SetSize(320, 24)
-    titleFrame:SetPoint("TOP", panel, "TOP", 0, -10)
-    titleFrame:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = false, edgeSize = 12,
-        insets = { left = 2, right = 2, top = 2, bottom = 2 }
-    })
-    titleFrame:SetBackdropColor(0.1, 0.1, 0.1, 0.9)
-    titleFrame:SetBackdropBorderColor(0.3, 0.3, 0.3)
+    local title = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    title:SetPoint("TOP", panel, "TOP", 0, -12)
+    title:SetText("Almost Completed Achievements")
 
-    local titleText = titleFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    titleText:SetPoint("CENTER", titleFrame, "CENTER", 0, 0)
-    titleText:SetText("Almost Completed Achievements")
-    titleText:SetTextColor(1.0, 0.82, 0.0)
+    local tab1 = CreateFrame("Button", panel:GetName() .. "Tab1", panel, "PanelTabButtonTemplate")
+    tab1:SetPoint("TOPLEFT", panel, "TOPLEFT", 14, -36)
+    tab1:SetText("Almost Completed")
+    local tab2 = CreateFrame("Button", panel:GetName() .. "Tab2", panel, "PanelTabButtonTemplate")
+    tab2:SetPoint("LEFT", tab1, "RIGHT", -15, 0)
+    tab2:SetText("Ignored")
+    PanelTemplates_SetNumTabs(panel, 2)
+    PanelTemplates_SetTab(panel, 1)
+    panel.tab1, panel.tab2 = tab1, tab2
 
-    -- Threshold slider container
-    local sliderContainer = CreateFrame("Frame", nil, panel, "BackdropTemplate")
-    sliderContainer:SetSize(220, 36)
-    sliderContainer:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 10, 10)
-    sliderContainer:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = false, edgeSize = 12,
-        insets = { left = 3, right = 3, top = 3, bottom = 3 }
-    })
-    sliderContainer:SetBackdropColor(0.1, 0.1, 0.1, 0.9)
-    sliderContainer:SetBackdropBorderColor(0.3, 0.3, 0.3)
+    local contentCompleted = CreateFrame("Frame", nil, panel)
+    contentCompleted:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -72)
+    contentCompleted:SetSize(396, 372)
+    local contentIgnored = CreateFrame("Frame", nil, panel)
+    contentIgnored:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -72)
+    contentIgnored:SetSize(396, 372)
+    contentIgnored:Hide()
+    panel.contentCompleted, panel.contentIgnored = contentCompleted, contentIgnored
 
-    -- Threshold slider
-    local slider = CreateFrame("Slider", nil, sliderContainer, "OptionsSliderTemplate")
-    slider:SetOrientation("HORIZONTAL")
-    slider:SetSize(200, 14)
-    slider:SetPoint("TOP", sliderContainer, "TOP", 0, -4)
-    slider:SetMinMaxValues(50, 100)
+    local scrollCompleted = CreateFrame("ScrollFrame", nil, contentCompleted, "UIPanelScrollFrameTemplate")
+    scrollCompleted:SetPoint("TOPLEFT", contentCompleted, "TOPLEFT", 0, 0)
+    scrollCompleted:SetPoint("BOTTOMRIGHT", contentCompleted, "BOTTOMRIGHT", -24, 0)
+    local childCompleted = CreateFrame("Frame", nil, scrollCompleted)
+    childCompleted:SetSize(396, 600)
+    scrollCompleted:SetScrollChild(childCompleted)
+    panel.scrollCompleted, panel.childCompleted = scrollCompleted, childCompleted
+
+    local scrollIgnored = CreateFrame("ScrollFrame", nil, contentIgnored, "UIPanelScrollFrameTemplate")
+    scrollIgnored:SetPoint("TOPLEFT", contentIgnored, "TOPLEFT", 0, 0)
+    scrollIgnored:SetPoint("BOTTOMRIGHT", contentIgnored, "BOTTOMRIGHT", -24, 0)
+    local childIgnored = CreateFrame("Frame", nil, scrollIgnored)
+    childIgnored:SetSize(396, 600)
+    scrollIgnored:SetScrollChild(childIgnored)
+    panel.scrollIgnored, panel.childIgnored = scrollIgnored, childIgnored
+
+    -- threshold slider
+    local slider = CreateFrame("Slider", nil, panel, "OptionsSliderTemplate")
+    slider:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 20, 18)
+    slider:SetWidth(180)
+    slider:SetMinMaxValues(ACA.SLIDER_MIN, ACA.SLIDER_MAX)
     slider:SetValueStep(1)
     slider:SetObeyStepOnDrag(true)
-    slider:SetValue(ACA_ScanThreshold or 80)
-
-    -- Slider label
+    slider:SetValue(ACA_ScanThreshold)
     slider.Text = slider:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    slider.Text:SetPoint("BOTTOM", sliderContainer, "BOTTOM", 0, 4)
-    slider.Text:SetText("Scan Threshold: " .. ACA_ScanThreshold .. "%")
+    slider.Text:SetPoint("BOTTOM", slider, "BOTTOM", 0, 4)
+    slider.Text:SetText("Scan Threshold: " .. tostring(ACA_ScanThreshold) .. "%")
+    panel.slider = slider
+
+    -- reward-filter dropdown
+    local filterDropdown = CreateFrame("Frame", nil, panel, "UIDropDownMenuTemplate")
+    filterDropdown:SetPoint("BOTTOMLEFT", slider, "BOTTOMRIGHT", 16, -6)
+    UIDropDownMenu_SetWidth(filterDropdown, 140)
+    UIDropDownMenu_SetText(filterDropdown, ACA_FilterMode)
+    panel.filterDropdown = filterDropdown
+
+    local function FilterDropdown_Initialize(self, level)
+        local info = UIDropDownMenu_CreateInfo()
+        for _, option in ipairs(FILTER_LIST) do
+            info.text = option
+            info.func = function()
+                ACA_FilterMode = option
+                UIDropDownMenu_SetText(filterDropdown, option)
+                ACA_Cache = {}
+                ACA.UpdatePanel(true)
+            end
+            info.checked = (ACA_FilterMode == option)
+            UIDropDownMenu_AddButton(info)
+        end
+    end
+    UIDropDownMenu_Initialize(filterDropdown, FilterDropdown_Initialize)
+
+    -- refresh / clear buttons
+    local refresh = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    refresh:SetSize(80, 22)
+    refresh:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -10, -10)
+    refresh:SetText("Refresh")
+    refresh:GetFontString():SetTextColor(1, 0.1, 0.1)
+    panel.refresh = refresh
+
+    local clearAllBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    clearAllBtn:SetSize(100, 24)
+    clearAllBtn:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 14, 14)
+    clearAllBtn:SetText("Clear All")
+    clearAllBtn:Hide()
+    panel.clearAllBtn = clearAllBtn
+
+    local function ShowTab(idx)
+        PanelTemplates_SetTab(panel, idx)
+        if idx == 1 then
+            contentCompleted:Show(); contentIgnored:Hide()
+            slider:Show(); filterDropdown:Show(); refresh:Show(); clearAllBtn:Hide()
+        else
+            contentCompleted:Hide(); contentIgnored:Show()
+            slider:Hide(); filterDropdown:Hide(); refresh:Hide(); clearAllBtn:Show()
+        end
+    end
+    tab1:SetScript("OnClick", function() ShowTab(1); ACA.UpdatePanel(true) end)
+    tab2:SetScript("OnClick", function() ShowTab(2); ACA.UpdatePanel(true) end)
 
     slider:SetScript("OnValueChanged", function(self, value)
-        ACA_ScanThreshold = math.floor(value)
-        self.Text:SetText("Scan Threshold: " .. ACA_ScanThreshold .. "%")
+        local v = floor(value)
+        ACA_ScanThreshold = v
+        self.Text:SetText("Scan Threshold: " .. v .. "%")
+        if pendingSliderRescanCancel then pendingSliderRescanCancel() end
+        local cancelled = false
+        pendingSliderRescanCancel = function() cancelled = true end
+        C_Timer.After(0.5, function()
+            if cancelled then return end
+            ACA_Cache = {}; ACA.UpdatePanel(true); pendingSliderRescanCancel = nil
+        end)
     end)
 
-    panel.thresholdSlider = slider
-    panel.sliderContainer = sliderContainer
-
-    -- Scroll frame for achievement buttons
-    local scrollFrame = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
-    scrollFrame:SetSize(340, 380) -- Reduced height to leave room for slider/refresh
-    scrollFrame:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -40)
-
-    local content = CreateFrame("Frame", nil, scrollFrame)
-    content:SetSize(340, 420)
-    scrollFrame:SetScrollChild(content)
-
-    panel.scrollFrame = scrollFrame
-    panel.content = content
-
-    -- Progress bar container
-    local progressContainer = CreateFrame("Frame", nil, panel, "BackdropTemplate")
-    progressContainer:SetSize(340, 22)
-    progressContainer:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 10, 10)
-    progressContainer:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-        tile = false, edgeSize = 12,
-        insets = { left = 3, right = 3, top = 3, bottom = 3 }
-    })
-    progressContainer:SetBackdropColor(0.1, 0.1, 0.1, 0.9)
-    progressContainer:SetBackdropBorderColor(0.3, 0.3, 0.3)
-
-    local progressBar = CreateFrame("StatusBar", nil, progressContainer)
-    progressBar:SetSize(334, 14)
-    progressBar:SetPoint("CENTER", progressContainer, "CENTER", 0, 0)
-    progressBar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
-    progressBar:SetMinMaxValues(0, 100)
-    progressBar:SetValue(0)
-    progressBar:SetStatusBarColor(0.22, 0.72, 0.0)
-
-    local bg = progressBar:CreateTexture(nil, "BACKGROUND")
-    bg:SetAllPoints(true)
-    bg:SetColorTexture(0.05, 0.05, 0.05, 0.6)
-
-    local progressText = progressBar:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    progressText:SetPoint("CENTER", progressBar, "CENTER", 0, 0)
-    progressText:SetText("Scanning...")
-
-    panel.progressBar = progressBar
-    panel.progressText = progressText
-    panel.progressContainer = progressContainer
-
-    -- Manual refresh button
-    local refreshButton = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    refreshButton:SetSize(100, 24)
-    refreshButton:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -10, 10)
-    refreshButton:SetText("Refresh")
-    refreshButton:SetScript("OnClick", function()
-        UpdateAlmostCompletedPanel()
+    refresh:SetScript("OnClick", function() ACA.UpdatePanel(true) end)
+    clearAllBtn:SetScript("OnClick", function()
+        ACA_IgnoreList = {}; ACA_Cache = {}
+        print("ACA: Cleared ignore list.")
+        ACA.UpdatePanel(true)
     end)
 
-    panel.refreshButton = refreshButton
-
-    -- Hide slider and refresh button initially to prevent flicker
-    panel.sliderContainer:Hide()
-    panel.refreshButton:Hide()
+    _G[ACA_PANEL_NAME] = panel
+    ShowTab(1)
+    return panel
 end
 
--- Helper to create achievement row with a button and X button
-local function CreateAchievementRow(parent, ach, yOffset, blacklistCallback)
-    local rowWidth = 292 -- leave room for X button
-    local rowHeight = 24
+----------------------------------------
+-- 10.  Update panel
+----------------------------------------
+function ACA.UpdatePanel(forceRescan)
+    local panel = CreateAlmostCompletedPanel()
+    if not panel then return end
+    local completedChild, ignoredChild = panel.childCompleted, panel.childIgnored
 
-    -- Achievement button
-    local button = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
-    button:SetSize(rowWidth, rowHeight)
-    button:SetPoint("TOPLEFT", parent, "TOPLEFT", 10, yOffset)
-    button:SetText(string.format("%.0f%% - %s", ach.percent, ach.name))
-    button:SetScript("OnClick", function()
-        AchievementFrame_SelectAchievement(ach.id)
-    end)
-    button:SetNormalFontObject("GameFontNormal")
-    button:SetHighlightFontObject("GameFontHighlight")
+    for _, child in ipairs({ completedChild:GetChildren() }) do ReleaseRow(child) end
+    for _, child in ipairs({ ignoredChild:GetChildren() }) do ReleaseRow(child) end
 
-    -- X button (Blacklist)
-    local xButton = CreateFrame("Button", nil, parent)
-    xButton:SetSize(20, 20)
-    xButton:SetPoint("LEFT", button, "RIGHT", 4, 0)
-    xButton:SetNormalTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Up")
-    xButton:SetPushedTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Down")
-    xButton:SetHighlightTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Highlight")
-    xButton:SetScript("OnClick", function()
-        blacklistCallback(ach.id)
-    end)
-    xButton:SetMotionScriptsWhileDisabled(true)
+    local threshold = ACA_ScanThreshold or ACA.DEFAULT_THRESHOLD
 
-    -- Tooltip for X button
-    xButton:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText("Blacklist this achievement from future scans.\nUse /acareset to reset the blacklist.", nil, nil, nil, nil, true)
-        GameTooltip:Show()
-    end)
-    xButton:SetScript("OnLeave", function()
-        GameTooltip:Hide()
-    end)
-end
-
--- Blacklist helper
-local function BlacklistAchievement(achievementID)
-    ACA_Blacklist[achievementID] = true
-    -- Remove the achievement from the current visible list without triggering a new scan
-    if AlmostCompletedPanel and AlmostCompletedPanel._currentAchievements then
-        for i, ach in ipairs(AlmostCompletedPanel._currentAchievements) do
-            if ach.id == achievementID then
-                table.remove(AlmostCompletedPanel._currentAchievements, i)
-                break
+    -- Ignored tab
+    if PanelTemplates_GetSelectedTab(panel) == 2 then
+        local ignored = {}
+        for id in pairs(ACA_IgnoreList) do
+            local aid = tonumber(id)
+            if aid then
+                local _, name, _, _, _, _, _, _, _, icon = GetAchievementInfo(aid)
+                table.insert(ignored, {
+                    id = aid, name = name or "[" .. tostring(aid) .. "]",
+                    percent = GetCompletionPercent(aid), icon = icon
+                })
             end
         end
-        -- Refresh the visible list only
-        local panel = AlmostCompletedPanel
-        local content = panel.content
-        -- Clear previous rows
-        for _, child in ipairs({ content:GetChildren() }) do
-            child:Hide()
-            child:SetParent(nil)
+        sort(ignored, function(a, b) return (a.name or ""):lower() < (b.name or ""):lower() end)
+        for i, ach in ipairs(ignored) do
+            local row = AcquireRow(ignoredChild)
+            row:SetPoint("TOPLEFT", ignoredChild, "TOPLEFT", 6, -((i - 1) * (ACA.ROW_HEIGHT + 4) + 6))
+            ACA:PopulateNativeRow(row, ach)
+            row._ignoreButton:SetText("✓")
+            row._ignoreButton:SetScript("OnClick", function()
+                ACA_IgnoreList[tonumber(ach.id)] = nil
+                print("ACA: Unignored " .. (ach.name or ach.id))
+                ACA_Cache = {}; ACA.UpdatePanel(true)
+            end)
         end
-        -- Recreate achievement rows
-        local yOffset = -10
-        for _, ach in ipairs(panel._currentAchievements) do
-            CreateAchievementRow(content, ach, yOffset, BlacklistAchievement)
-            yOffset = yOffset - 28
-        end
-        content:SetHeight(#panel._currentAchievements * 28 + 50)
-    end
-end
-
--- Update the panel with scanned achievements
-function UpdateAlmostCompletedPanel()
-    if not AlmostCompletedPanel then return end
-
-    local panel = AlmostCompletedPanel
-    local content = panel.content
-    local scrollFrame = panel.scrollFrame
-    local scrollBar = panel.scrollBar
-    local progressBar = panel.progressBar
-    local progressText = panel.progressText
-    local progressContainer = panel.progressContainer
-    local refreshButton = panel.refreshButton
-    local sliderContainer = panel.sliderContainer
-
-    -- Safety check to prevent nil access
-    if not refreshButton or not sliderContainer then
-        print("Warning: UI elements not initialized yet.")
+        ignoredChild:SetHeight(math.max(200, (#ignored * (ACA.ROW_HEIGHT + 4)) + 20))
         return
     end
 
-    -- Clear previous rows
-    for _, child in ipairs({ content:GetChildren() }) do
-        child:Hide()
-        child:SetParent(nil)
+    -- Completed tab
+    local cached = GetCachedResultsForThreshold(threshold)
+    if cached and not forceRescan then
+        for i, ach in ipairs(cached) do
+            local row = AcquireRow(completedChild)
+            row:SetPoint("TOPLEFT", completedChild, "TOPLEFT", 6, -((i - 1) * (ACA.ROW_HEIGHT + 4) + 6))
+            ACA:PopulateNativeRow(row, ach)
+        end
+        completedChild:SetHeight(math.max(200, (#cached * (ACA.ROW_HEIGHT + 4)) + 20))
+        return
     end
 
-    -- Reset progress visuals
-    progressBar:SetValue(0)
-    progressText:SetText("Scanning...")
-    progressBar:Show()
-    progressText:Show()
-    progressContainer:Show()
-
-    -- Hide refresh button and slider during scan
-    refreshButton:Hide()
-    sliderContainer:Hide()
-
-    -- Begin scanning
-    ScanAchievements(function(nudges)
-        -- Hide progress visuals after scan
-        progressBar:Hide()
-        progressText:Hide()
-        progressContainer:Hide()
-
-        -- Show refresh button and slider after scan
-        refreshButton:Show()
-        sliderContainer:Show()
-
-        -- Save current achievements for blacklist removal
-        panel._currentAchievements = nudges
-
-        -- Create achievement rows
-        local yOffset = -10
-        for _, ach in ipairs(nudges) do
-            CreateAchievementRow(content, ach, yOffset, BlacklistAchievement)
-            yOffset = yOffset - 28
+    -- fresh scan
+    ScanAchievements(function(results)
+        StoreCacheForThreshold(threshold, results)
+        for i, ach in ipairs(results) do
+            local row = AcquireRow(completedChild)
+            row:SetPoint("TOPLEFT", completedChild, "TOPLEFT", 6, -((i - 1) * (ACA.ROW_HEIGHT + 4) + 6))
+            ACA:PopulateNativeRow(row, ach)
         end
-
-        content:SetHeight(#nudges * 28 + 50)
+        completedChild:SetHeight(math.max(200, (#results * (ACA.ROW_HEIGHT + 4)) + 20))
     end,
-    function(categoryIndex, achievementIndex)
-        local totalCategories = #GetCategoryList()
-        local progress = ((categoryIndex - 1) / totalCategories) * 100
-        progressBar:SetValue(progress)
-        progressText:SetText(string.format("Scanning... %.0f%%", progress))
+    function(scanned, total)
+        local pct = total > 0 and (scanned / total) * 100 or 0
+        local p = _G[ACA_PANEL_NAME]
+        if p and p.slider and p.slider.Text then
+            p.slider.Text:SetText(format("Scanning... %d/%d (%.0f%%) | Threshold: %d%%", scanned, total, pct, threshold))
+        end
     end)
 end
 
--- Initialization and hook setup
+----------------------------------------
+-- 11.  Loader & slash
+----------------------------------------
 local loader = CreateFrame("Frame")
 loader:RegisterEvent("ADDON_LOADED")
 loader:RegisterEvent("PLAYER_ENTERING_WORLD")
-loader:SetScript("OnEvent", function(_, event, addonName)
-    if event == "ADDON_LOADED" and (addonName == "Blizzard_AchievementUI" or addonName == "AlmostCompletedAchievements") then
+loader:SetScript("OnEvent", function(self, event, arg1)
+    if event == "ADDON_LOADED" and arg1 == ADDON_NAME then
+        ACA_ScanThreshold   = ACA_ScanThreshold or ACA.DEFAULT_THRESHOLD
+        ACA_Cache           = ACA_Cache or {}
+        ACA_IgnoreList      = ACA_IgnoreList or {}
+        ACA_FilterMode      = ACA_FilterMode or "All"
+		if ACA_Blacklist and type(ACA_Blacklist)=="table" then
+        for id,_ in pairs(ACA_Blacklist) do
+            ACA_IgnoreList[tonumber(id)] = true
+        end
+        print("ACA: imported "..#(ACA_Blacklist).." entries from old blacklist.")
+        ACA_Blacklist = nil        -- wipe the old table
+    end
         CreateAlmostCompletedPanel()
     elseif event == "PLAYER_ENTERING_WORLD" then
-        if AchievementFrame and not AchievementFrame._nudgesHooked then
-            AchievementFrame._nudgesHooked = true
-            AchievementFrame:HookScript("OnShow", function()
-                -- Delay to ensure panel is fully initialized
-                C_Timer.After(0.1, function()
-                    AlmostCompletedPanel:Show()
+        if _G["AchievementFrame"] and not _G["AchievementFrame"]._acaHooked then
+            _G["AchievementFrame"]._acaHooked = true
+            _G["AchievementFrame"]:HookScript("OnShow", function()
+                C_Timer.After(0.3, function()
+                    local p = CreateAlmostCompletedPanel()
+                    if p then p:Show(); PanelTemplates_SetTab(p, 1) end
                     if not hasScannedThisSession then
-                        hasScannedThisSession = true
-                        C_Timer.After(0.4, UpdateAlmostCompletedPanel)
+                        hasScannedThisSession = false
+                        C_Timer.After(0.4, function()
+						local p = _G[ACA_PANEL_NAME]
+						if p then p:Show() end
+						end)
                     end
                 end)
             end)
@@ -383,22 +544,12 @@ loader:SetScript("OnEvent", function(_, event, addonName)
     end
 end)
 
--- Slash command to manually show ACA panel
 SLASH_ALMOSTCOMPLETED1 = "/aca"
 SlashCmdList["ALMOSTCOMPLETED"] = function()
-    if not AlmostCompletedPanel then
-        CreateAlmostCompletedPanel()
-    end
-    UpdateAlmostCompletedPanel()
-    AlmostCompletedPanel:Show()
+    local p = CreateAlmostCompletedPanel()
+    if p then p:Show(); ACA.UpdatePanel(true) end
 end
 
--- Slash command to reset blacklist
-SLASH_ACARESET1 = "/acareset"
-SlashCmdList["ACARESET"] = function()
-    ACA_Blacklist = {}
-    print("Almost Completed Achievements: Blacklist cleared.")
-    if AlmostCompletedPanel then
-        UpdateAlmostCompletedPanel()
-    end
-end
+-- expose
+ACA.UpdatePanel = ACA.UpdatePanel
+ACA.GetCompletionPercent = GetCompletionPercent

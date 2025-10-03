@@ -1,10 +1,9 @@
 ## Interface: 50501
 ## Title: Almost Completed Achievements (Classic)
 ## Notes: Highlights achievements that are nearly complete
-## Version 1.2
-## Author: Schutey
+## Version 1.3
+## Author: Schutey & Kagrok
 
-## SavedVariables: ACA_ScanThreshold
-## SavedVariables: ACA_Blacklist
+## SavedVariablesPerCharacter: ACA_ScanThreshold, ACA_Cache, ACA_IgnoreList, ACA_SortMode
 
 AlmostCompletedAchievements.lua
