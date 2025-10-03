@@ -1,6 +1,6 @@
 --------------------------------------------------------------------------------
 -- AlmostCompletedAchievements
--- v1.3  –  Reward-filter edition
+-- v1.3  –  Reward-filter edition (with Options tab + scan progress bar)
 --  reward filter dropdown 
 --------------------------------------------------------------------------------
 local ADDON_NAME, ACA = "AlmostCompletedAchievements", {}
@@ -29,8 +29,8 @@ local UIParentLoadAddOn = UIParentLoadAddOn
 ----------------------------------------
 -- 3.  Constants
 ----------------------------------------
-ACA.BATCH_SIZE      = 20
-ACA.SCAN_DELAY      = 0.02
+ACA.BATCH_SIZE      = 15
+ACA.SCAN_DELAY      = 0.025
 ACA.SLIDER_MIN      = 50
 ACA.SLIDER_MAX      = 100
 ACA.DEFAULT_THRESHOLD = 80
@@ -292,7 +292,7 @@ local function CreateAlmostCompletedPanel()
     local parent = _G["AchievementFrame"] or UIParent
 
     local panel = CreateFrame("Frame", ACA_PANEL_NAME, parent, "BackdropTemplate")
-    panel:SetSize(420, 520)
+    panel:SetSize(420, 500)
     panel:SetPoint("TOPLEFT", parent, "TOPRIGHT", 10, 0)
     panel:SetBackdrop({
         bgFile = "Interface\\AchievementFrame\\UI-Achievement-Parchment-Horizontal",
@@ -307,15 +307,24 @@ local function CreateAlmostCompletedPanel()
     title:SetPoint("TOP", panel, "TOP", 0, -12)
     title:SetText("Almost Completed Achievements")
 
-    local tab1 = CreateFrame("Button", panel:GetName() .. "Tab1", panel, "PanelTabButtonTemplate")
-    tab1:SetPoint("TOPLEFT", panel, "TOPLEFT", 14, -36)
-    tab1:SetText("Almost Completed")
-    local tab2 = CreateFrame("Button", panel:GetName() .. "Tab2", panel, "PanelTabButtonTemplate")
-    tab2:SetPoint("LEFT", tab1, "RIGHT", -15, 0)
-    tab2:SetText("Ignored")
-    PanelTemplates_SetNumTabs(panel, 2)
-    PanelTemplates_SetTab(panel, 1)
-    panel.tab1, panel.tab2 = tab1, tab2
+    -- tabs: Almost Completed, Ignored, Options
+	local tab1 = CreateFrame("Button", panel:GetName() .. "Tab1", panel, "PanelTabButtonTemplate")
+	tab1:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 14, -30) -- anchor to bottom edge
+	tab1:SetText("Almost Completed")
+
+	local tab2 = CreateFrame("Button", panel:GetName() .. "Tab2", panel, "PanelTabButtonTemplate")
+	tab2:SetPoint("LEFT", tab1, "RIGHT", -15, 0)
+	tab2:SetText("Ignored")
+
+	local tab3 = CreateFrame("Button", panel:GetName() .. "Tab3", panel, "PanelTabButtonTemplate")
+	tab3:SetPoint("LEFT", tab2, "RIGHT", -15, 0)
+	tab3:SetText("Options")
+
+	PanelTemplates_SetNumTabs(panel, 3)
+	PanelTemplates_SetTab(panel, 1)
+
+	panel.tab1, panel.tab2, panel.tab3 = tab1, tab2, tab3
+
 
     local contentCompleted = CreateFrame("Frame", nil, panel)
     contentCompleted:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -72)
@@ -324,7 +333,11 @@ local function CreateAlmostCompletedPanel()
     contentIgnored:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -72)
     contentIgnored:SetSize(396, 372)
     contentIgnored:Hide()
-    panel.contentCompleted, panel.contentIgnored = contentCompleted, contentIgnored
+    local contentOptions = CreateFrame("Frame", nil, panel)
+    contentOptions:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -72)
+    contentOptions:SetSize(396, 372)
+    contentOptions:Hide()
+    panel.contentCompleted, panel.contentIgnored, panel.contentOptions = contentCompleted, contentIgnored, contentOptions
 
     local scrollCompleted = CreateFrame("ScrollFrame", nil, contentCompleted, "UIPanelScrollFrameTemplate")
     scrollCompleted:SetPoint("TOPLEFT", contentCompleted, "TOPLEFT", 0, 0)
@@ -342,22 +355,28 @@ local function CreateAlmostCompletedPanel()
     scrollIgnored:SetScrollChild(childIgnored)
     panel.scrollIgnored, panel.childIgnored = scrollIgnored, childIgnored
 
-    -- threshold slider
-    local slider = CreateFrame("Slider", nil, panel, "OptionsSliderTemplate")
-    slider:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 20, 18)
-    slider:SetWidth(180)
-    slider:SetMinMaxValues(ACA.SLIDER_MIN, ACA.SLIDER_MAX)
-    slider:SetValueStep(1)
-    slider:SetObeyStepOnDrag(true)
-    slider:SetValue(ACA_ScanThreshold)
-    slider.Text = slider:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    slider.Text:SetPoint("BOTTOM", slider, "BOTTOM", 0, 4)
-    slider.Text:SetText("Scan Threshold: " .. tostring(ACA_ScanThreshold) .. "%")
-    panel.slider = slider
+    -- === Progress bar (replaces slider that used to live on main panel) ===
+    local scanBar = CreateFrame("StatusBar", nil, panel, "TextStatusBar")
+    scanBar:SetSize(180, 18)
+    scanBar:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 20, 18)
+    scanBar:SetStatusBarTexture("Interface\\TARGETINGFRAME\\UI-StatusBar")
+    scanBar:GetStatusBarTexture():SetHorizTile(false)
+    scanBar:SetMinMaxValues(0, 1)
+    scanBar:SetValue(0)
+    scanBar:SetMovable(false)
+    -- background for bar
+    scanBar.bg = scanBar:CreateTexture(nil, "BACKGROUND")
+    scanBar.bg:SetAllPoints(scanBar)
+    scanBar.bg:SetColorTexture(0.1, 0.1, 0.1, 0.6)
+    -- text on bar
+    scanBar.Text = scanBar:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    scanBar.Text:SetPoint("CENTER", scanBar, "CENTER", 0, 0)
+    scanBar.Text:SetText("Idle")
+    panel.scanBar = scanBar
 
-    -- reward-filter dropdown
+    -- reward-filter dropdown (anchor to progress bar so layout resembles previous)
     local filterDropdown = CreateFrame("Frame", nil, panel, "UIDropDownMenuTemplate")
-    filterDropdown:SetPoint("BOTTOMLEFT", slider, "BOTTOMRIGHT", 16, -6)
+    filterDropdown:SetPoint("BOTTOMLEFT", scanBar, "BOTTOMRIGHT", 16, -6)
     UIDropDownMenu_SetWidth(filterDropdown, 140)
     UIDropDownMenu_SetText(filterDropdown, ACA_FilterMode)
     panel.filterDropdown = filterDropdown
@@ -393,19 +412,51 @@ local function CreateAlmostCompletedPanel()
     clearAllBtn:Hide()
     panel.clearAllBtn = clearAllBtn
 
+    -- === Options tab contents ===
+    -- Threshold slider moved to Options tab
+    local slider = CreateFrame("Slider", nil, contentOptions, "OptionsSliderTemplate")
+    slider:SetPoint("TOPLEFT", contentOptions, "TOPLEFT", 12, -12)
+    slider:SetWidth(220)
+    slider:SetMinMaxValues(ACA.SLIDER_MIN, ACA.SLIDER_MAX)
+    slider:SetValueStep(1)
+    slider:SetObeyStepOnDrag(true)
+    slider:SetValue(ACA_ScanThreshold)
+    slider.Text = slider:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    slider.Text:SetPoint("TOP", slider, "TOP", 0, -18)
+    slider.Text:SetText("Scan Threshold: " .. tostring(ACA_ScanThreshold) .. "%")
+    panel.optionsSlider = slider
+
+    -- optional explanatory text in options
+    local optText = contentOptions:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    optText:SetPoint("TOPLEFT", slider, "BOTTOMLEFT", 0, -12)
+    optText:SetText("Set the completion % threshold used when scanning.\nChanges are debounced to avoid excessive rescans.")
+    optText:SetJustifyH("LEFT")
+
+    -- tab show/hide logic
     local function ShowTab(idx)
         PanelTemplates_SetTab(panel, idx)
         if idx == 1 then
-            contentCompleted:Show(); contentIgnored:Hide()
-            slider:Show(); filterDropdown:Show(); refresh:Show(); clearAllBtn:Hide()
-        else
-            contentCompleted:Hide(); contentIgnored:Show()
-            slider:Hide(); filterDropdown:Hide(); refresh:Hide(); clearAllBtn:Show()
+            contentCompleted:Show(); contentIgnored:Hide(); contentOptions:Hide()
+            panel.scanBar:Show()
+            panel.optionsSlider:Hide()
+            refresh:Show(); clearAllBtn:Hide()
+        elseif idx == 2 then
+            contentCompleted:Hide(); contentIgnored:Show(); contentOptions:Hide()
+            panel.scanBar:Hide()
+            panel.optionsSlider:Hide()
+            refresh:Hide(); clearAllBtn:Show()
+        else -- idx == 3 (Options)
+            contentCompleted:Hide(); contentIgnored:Hide(); contentOptions:Show()
+            panel.scanBar:Hide()
+            panel.optionsSlider:Show()
+            refresh:Hide(); clearAllBtn:Hide()
         end
     end
     tab1:SetScript("OnClick", function() ShowTab(1); ACA.UpdatePanel(true) end)
     tab2:SetScript("OnClick", function() ShowTab(2); ACA.UpdatePanel(true) end)
+    tab3:SetScript("OnClick", function() ShowTab(3); ACA.UpdatePanel(true) end)
 
+    -- slider behavior (debounced rescan) — moved to Options tab
     slider:SetScript("OnValueChanged", function(self, value)
         local v = floor(value)
         ACA_ScanThreshold = v
@@ -473,7 +524,7 @@ function ACA.UpdatePanel(forceRescan)
         return
     end
 
-    -- Completed tab
+    -- Completed tab (cache)
     local cached = GetCachedResultsForThreshold(threshold)
     if cached and not forceRescan then
         for i, ach in ipairs(cached) do
@@ -494,12 +545,29 @@ function ACA.UpdatePanel(forceRescan)
             ACA:PopulateNativeRow(row, ach)
         end
         completedChild:SetHeight(math.max(200, (#results * (ACA.ROW_HEIGHT + 4)) + 20))
+
+        -- ensure scan bar resets to idle after completion
+        local p = _G[ACA_PANEL_NAME]
+        if p and p.scanBar then
+            p.scanBar:SetMinMaxValues(0, 1)
+            p.scanBar:SetValue(0)
+            p.scanBar.Text:SetText("Idle")
+        end
     end,
     function(scanned, total)
-        local pct = total > 0 and (scanned / total) * 100 or 0
         local p = _G[ACA_PANEL_NAME]
-        if p and p.slider and p.slider.Text then
-            p.slider.Text:SetText(format("Scanning... %d/%d (%.0f%%) | Threshold: %d%%", scanned, total, pct, threshold))
+        if p and p.scanBar and p.scanBar.Text then
+            if total and total > 0 then
+                -- set range dynamically so bar fills relative to total
+                p.scanBar:SetMinMaxValues(0, total)
+                p.scanBar:SetValue(scanned)
+                local pct = (scanned / total) * 100
+                p.scanBar.Text:SetText(format("Scanning... %d/%d (%.0f%%)", scanned, total, pct))
+            else
+                p.scanBar:SetMinMaxValues(0, 1)
+                p.scanBar:SetValue(0)
+                p.scanBar.Text:SetText("Scanning... 0/0")
+            end
         end
     end)
 end
