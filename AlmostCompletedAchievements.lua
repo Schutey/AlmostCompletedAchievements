@@ -1,6 +1,6 @@
 --------------------------------------------------------------------------------
 -- AlmostCompletedAchievements
--- v1.3  –  Reward-filter edition (with Options tab + scan progress bar)
+-- v1.3.5  –  Reward-filter edition (with Options tab + scan progress bar)
 --  reward filter dropdown
 --------------------------------------------------------------------------------
 local ADDON_NAME, ACA = "AlmostCompletedAchievements", {}
@@ -647,3 +647,4 @@ end
 -- expose
 ACA.UpdatePanel = ACA.UpdatePanel
 ACA.GetCompletionPercent = GetCompletionPercent
+
