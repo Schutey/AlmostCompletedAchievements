@@ -120,19 +120,19 @@ local function AcquireRow(parent)
     f.Icon:SetPoint("LEFT", f, "LEFT", 4, 0)
 
     f.Name = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    f.Name:SetPoint("LEFT", f.Icon, "RIGHT", 8, 6)
+    f.Name:SetPoint("LEFT", f.Icon, "RIGHT", 8, 8)
     f.Name:SetJustifyH("LEFT")
     f.Name:SetWidth(220)
 
     -- percent label under the name
-    f.Label = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    f.Label:SetPoint("TOPLEFT", f.Icon, "TOPRIGHT", 8, -18)
+    f.Label = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    f.Label:SetPoint("TOPLEFT", f.Icon, "TOPRIGHT", 8, -20)
     f.Label:SetJustifyH("LEFT")
     f.Label:SetWidth(220)
 
     f._ignoreButton = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
     f._ignoreButton:SetSize(24, 20)
-    f._ignoreButton:SetPoint("RIGHT", f, "RIGHT", -6, 0)
+    f._ignoreButton:SetPoint("RIGHT", f, "RIGHT", -6, -6)
 
     f.Reward = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     f.Reward:SetPoint("RIGHT", f._ignoreButton, "LEFT", -8, 0)
