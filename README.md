@@ -42,7 +42,7 @@ Schutey & Kagrok
 
 
 ## Version 1.3.5
-Scannig Logic:
+Scanning Logic:
 - Single-scan guard: addon now scans once per session and keeps results in RAM; repeated tab-switches or filter changes only re-filter the cached list instead of re-scanning.
 - Scan is only re-triggered when user clicks Refresh, threshold slider changes, ignore list is modified.
 - Prevents overlapping scans
@@ -51,6 +51,7 @@ Performance / UX:
 - Reward-dropdown changes are instant (no wipe, no scan).
 - Old achievement rows are cleared before populating a new set (no ghost entries while updating).
 - Removed redundant ACA_Cache file-cache hits for the main list; in-memory table is used unless threshold changes.
+- Changed parse perameters to smooth out scanning permance hit.
 
 Options tab:
 - Threshold slider moved from main panel into dedicated Options tab.
@@ -60,13 +61,13 @@ Options tab:
 Scan progress bar:
 - Replaced the old threshold slider slot with a visual progress bar that fills during scans.
 - Shows real-time numbers: Scanned / Total (%).
-- Bar fill colour updated to emerald green (0, 0.8, 0.2, 1) to match the achievement-panel theme; background remains dark-grey 60 % alpha.
+- Bar fill color updated to emerald green (0, 0.8, 0.2, 1) to match the achievement-panel theme; background remains dark-grey 60 % alpha.
 - Automatically returns to “Idle” when scan finishes.
 
-Performance / UX:
-- Changed parse perameters to smooth out scanning permance hit.
+Appearance
 - Replaced the old threshold slider slot with a visual progress bar that fills during scans.
 - Shows real-time numbers: Scanned / Total (%).
-- Bar fill colour updated to emerald green (0, 0.8, 0.2, 1) to match the achievement-panel theme; background remains dark-grey 60 % alpha.
+- Bar fill color updated to emerald green (0, 0.8, 0.2, 1) to match the achievement-panel theme; background remains dark-grey 60 % alpha.
 - Automatically returns to “Idle” when scan finishes.
+- Adjust Text formatting on listed achievements for better readability
 
