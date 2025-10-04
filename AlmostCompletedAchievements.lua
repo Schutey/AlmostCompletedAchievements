@@ -124,7 +124,7 @@ local function AcquireRow(parent)
     f.Name:SetJustifyH("LEFT")
     f.Name:SetWidth(220)
 
-    -- NEW: percent label under the name
+    -- percent label under the name
     f.Label = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     f.Label:SetPoint("TOPLEFT", f.Icon, "TOPRIGHT", 8, -18)
     f.Label:SetJustifyH("LEFT")
@@ -154,6 +154,13 @@ end
 local function TruncateString(s, max)
     if not s or #s <= max then return s or "" end
     return s:sub(1, max - 3) .. "..."
+end
+
+-- NEW: wipe all rows from a scroll child
+local function WipeChildren(frame)
+    for _, child in ipairs({ frame:GetChildren() }) do
+        ReleaseRow(child)
+    end
 end
 
 ----------------------------------------
@@ -387,7 +394,6 @@ local function CreateAlmostCompletedPanel()
             info.func = function()
                 ACA_FilterMode = option
                 UIDropDownMenu_SetText(filterDropdown, option)
-                -- no cache wipe; just re-filter
                 ACA.UpdatePanel(false)
             end
             info.checked = (ACA_FilterMode == option)
@@ -461,7 +467,7 @@ local function CreateAlmostCompletedPanel()
         pendingSliderRescanCancel = function() cancelled = true end
         C_Timer.After(0.5, function()
             if cancelled then return end
-            ACA.scanResults = {}               -- invalidate cache
+            ACA.scanResults = {}
             ACA.scanResultsForThr = nil
             ACA.UpdatePanel(true)
             pendingSliderRescanCancel = nil
@@ -469,13 +475,13 @@ local function CreateAlmostCompletedPanel()
     end)
 
     refresh:SetScript("OnClick", function()
-        ACA.scanResults = {}                   -- invalidate cache
+        ACA.scanResults = {}
         ACA.scanResultsForThr = nil
         ACA.UpdatePanel(true)
     end)
     clearAllBtn:SetScript("OnClick", function()
         ACA_IgnoreList = {}
-        ACA.scanResults = {}                   -- invalidate cache
+        ACA.scanResults = {}
         ACA.scanResultsForThr = nil
         print("ACA: Cleared ignore list.")
         ACA.UpdatePanel(true)
@@ -487,23 +493,20 @@ local function CreateAlmostCompletedPanel()
 end
 
 ----------------------------------------
--- 10.  Update panel  –  CACHE-FIRST LOGIC
+-- 10.  Update panel  –  CACHE-FIRST + WIPE ROWS
 ----------------------------------------
 function ACA.UpdatePanel(forceRescan)
     local panel = CreateAlmostCompletedPanel()
     if not panel then return end
     local completedChild, ignoredChild = panel.childCompleted, panel.childIgnored
 
-    -- clear old rows
-    for _, child in ipairs({ completedChild:GetChildren() }) do ReleaseRow(child) end
-    for _, child in ipairs({ ignoredChild:GetChildren() }) do ReleaseRow(child) end
-
     local threshold = ACA_ScanThreshold or ACA.DEFAULT_THRESHOLD
 
     --------------------------------------------------
-    -- Ignored tab (tiny list, always rebuilt)
+    -- Ignored tab – WIPE then rebuild
     --------------------------------------------------
     if PanelTemplates_GetSelectedTab(panel) == 2 then
+        WipeChildren(ignoredChild)   -- CLEAR OLD ROWS
         local ignored = {}
         for id in pairs(ACA_IgnoreList) do
             local aid = tonumber(id)
@@ -524,7 +527,7 @@ function ACA.UpdatePanel(forceRescan)
             row._ignoreButton:SetScript("OnClick", function()
                 ACA_IgnoreList[tonumber(ach.id)] = nil
                 print("ACA: Unignored " .. (ach.name or ach.id))
-                ACA.scanResults = {}               -- invalidate cache
+                ACA.scanResults = {}
                 ACA.scanResultsForThr = nil
                 ACA.UpdatePanel(true)
             end)
@@ -534,7 +537,7 @@ function ACA.UpdatePanel(forceRescan)
     end
 
     --------------------------------------------------
-    -- Completed tab – cache first
+    -- Completed tab – CACHE FIRST + WIPE ROWS
     --------------------------------------------------
     local needFreshScan = forceRescan
                      or not ACA.scanResultsForThr
@@ -542,6 +545,7 @@ function ACA.UpdatePanel(forceRescan)
                      or #ACA.scanResults == 0
 
     local function display(results)
+        WipeChildren(completedChild)   -- CLEAR OLD ROWS
         -- apply reward filter
         local filtered = {}
         local filtFn = FILTERS[ACA_FilterMode] or FILTERS["All"]
@@ -614,7 +618,6 @@ loader:SetScript("OnEvent", function(self, event, arg1)
             if p then
                 p:Show()
                 PanelTemplates_SetTab(p, 1)
-                -- remove the line below if you do NOT want auto-scan on first show
                 ACA.UpdatePanel(false)
             end
         end)
