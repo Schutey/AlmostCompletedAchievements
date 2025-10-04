@@ -1,4 +1,4 @@
-# Almost Completed Achievements (v1.3)
+# Almost Completed Achievements (v1.3.5)
 
 This addon highlights achievements that are nearly complete, helping you focus on the ones closest to finishing.
 
