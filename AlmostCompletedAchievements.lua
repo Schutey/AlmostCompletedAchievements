@@ -361,6 +361,7 @@ local function CreateAlmostCompletedPanel()
     scanBar:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 20, 18)
     scanBar:SetStatusBarTexture("Interface\\TARGETINGFRAME\\UI-StatusBar")
     scanBar:GetStatusBarTexture():SetHorizTile(false)
+	scanBar:GetStatusBarTexture():SetVertexColor(0, 0.8, 0.1, 1)
     scanBar:SetMinMaxValues(0, 1)
     scanBar:SetValue(0)
     scanBar:SetMovable(false)
@@ -628,3 +629,4 @@ end
 -- expose
 ACA.UpdatePanel = ACA.UpdatePanel
 ACA.GetCompletionPercent = GetCompletionPercent
+
