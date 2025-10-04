@@ -1,6 +1,6 @@
 --------------------------------------------------------------------------------
 -- AlmostCompletedAchievements
--- v1.3.5  –  Reward-filter edition (with Options tab + scan progress bar)
+-- v1.3  –  Reward-filter edition (with Options tab + scan progress bar)
 --  reward filter dropdown
 --------------------------------------------------------------------------------
 local ADDON_NAME, ACA = "AlmostCompletedAchievements", {}
@@ -406,8 +406,8 @@ local function CreateAlmostCompletedPanel()
     local refresh = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
     refresh:SetSize(80, 22)
     refresh:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -10, -10)
-    refresh:SetText("Refresh")
-    refresh:GetFontString():SetTextColor(1, 0.1, 0.1)
+    refresh:SetText("Rescan")
+    refresh:GetFontString():SetTextColor(1, 1, 1)
     panel.refresh = refresh
 
     local clearAllBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
@@ -647,4 +647,3 @@ end
 -- expose
 ACA.UpdatePanel = ACA.UpdatePanel
 ACA.GetCompletionPercent = GetCompletionPercent
-
