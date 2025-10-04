@@ -56,6 +56,8 @@ Performance / UX:
 Options tab:
 - Threshold slider moved from main panel into dedicated Options tab.
 - Includes inline help text explaining the setting.
+- Added scan speed dropdown Fast/smooth/slow
+- Added anchor options; left or right of the achievements panel
 - Open for expansion
 
 Scan progress bar:
