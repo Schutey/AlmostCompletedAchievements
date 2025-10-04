@@ -1,7 +1,7 @@
 --------------------------------------------------------------------------------
 -- AlmostCompletedAchievements
 -- v1.3  –  Reward-filter edition (with Options tab + scan progress bar)
---  reward filter dropdown 
+--  reward filter dropdown
 --------------------------------------------------------------------------------
 local ADDON_NAME, ACA = "AlmostCompletedAchievements", {}
 _G[ADDON_NAME] = ACA
@@ -12,7 +12,7 @@ _G[ADDON_NAME] = ACA
 ACA_ScanThreshold   = ACA_ScanThreshold or 80
 ACA_Cache           = ACA_Cache or {}
 ACA_IgnoreList      = ACA_IgnoreList or {}
-ACA_FilterMode      = ACA_FilterMode or "All"  
+ACA_FilterMode      = ACA_FilterMode or "All"
 
 ----------------------------------------
 -- 2.  Locals & API caches
@@ -39,7 +39,7 @@ ACA_PANEL_NAME      = "AlmostCompletedPanel"
 ACA.ROW_HEIGHT      = 44
 
 ----------------------------------------
--- 4.  Reward-filter tables 
+-- 4.  Reward-filter tables
 ----------------------------------------
 local FILTERS = {
     ["All"]                 = function(r) return true end,
@@ -94,7 +94,7 @@ local function StoreCacheForThreshold(th, res)
 end
 
 ----------------------------------------
--- 6.  Row pool 
+-- 6.  Row pool
 ----------------------------------------
 local rowPool = {}
 local function AcquireRow(parent)
@@ -211,21 +211,28 @@ function ACA:PopulateNativeRow(row, ach)
     row._ignoreButton:SetScript("OnClick", function()
         ACA_IgnoreList[tonumber(ach.id)] = (not ACA_IgnoreList[tonumber(ach.id)]) or nil
         print(format("ACA: %s %s", ACA_IgnoreList[tonumber(ach.id)] and "Ignored" or "Unignored", ach.name or ach.id))
-        ACA_Cache = {}
+        ACA.scanResults = {}               -- invalidate cache
+        ACA.scanResultsForThr = nil
         ACA.UpdatePanel(true)
     end)
     row._ignoreButton:SetText(ACA_IgnoreList[tonumber(ach.id)] and "✓" or "X")
 end
 
 ----------------------------------------
--- 8.  Scanner (batched)
+-- 8.  Scanner (batched)  – SINGLE-SCAN GUARD
 ----------------------------------------
-local hasScannedThisSession = false
-local pendingSliderRescanCancel = nil
+local scanning        = false          -- true while a scan coroutine is active
+ACA.scanResults       = {}             -- the *one* master list we keep
+ACA.scanResultsForThr = nil            -- threshold that produced the list
 
 local function ScanAchievements(onComplete, onProgress)
+    if scanning then return end          -- ignore re-entry
+    scanning = true
+    wipe(ACA.scanResults)
+    ACA.scanResultsForThr = ACA_ScanThreshold
+
     C_Timer.After(0, function()
-        local results, categories = {}, SafeGetCategoryList()
+        local results, categories = ACA.scanResults, SafeGetCategoryList()
         local totalCategories = #categories
         local currentCat, currentAch = 1, 1
         local scanned, totalToScan = 0, 0
@@ -268,13 +275,8 @@ local function ScanAchievements(onComplete, onProgress)
             end
 
             if currentCat > totalCategories then
-                local filtered = {}
-                local filtFn = FILTERS[ACA_FilterMode] or FILTERS["All"]
-                for _, v in ipairs(results) do
-                    if filtFn(v.reward or "") then table.insert(filtered, v) end
-                end
-                sort(filtered, function(a, b) return a.percent > b.percent end)
-                if onComplete then onComplete(filtered) end
+                scanning = false
+                if onComplete then onComplete(results) end
             else
                 C_Timer.After(ACA.SCAN_DELAY, step)
             end
@@ -308,40 +310,38 @@ local function CreateAlmostCompletedPanel()
     title:SetText("Almost Completed Achievements")
 
     -- tabs: Almost Completed, Ignored, Options
-	local tab1 = CreateFrame("Button", panel:GetName() .. "Tab1", panel, "PanelTabButtonTemplate")
-	tab1:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 14, -30) -- anchor to bottom edge
-	tab1:SetText("Almost Completed")
+    local tab1 = CreateFrame("Button", panel:GetName() .. "Tab1", panel, "PanelTabButtonTemplate")
+    tab1:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 14, -30)
+    tab1:SetText("Almost Completed")
 
-	local tab2 = CreateFrame("Button", panel:GetName() .. "Tab2", panel, "PanelTabButtonTemplate")
-	tab2:SetPoint("LEFT", tab1, "RIGHT", -15, 0)
-	tab2:SetText("Ignored")
+    local tab2 = CreateFrame("Button", panel:GetName() .. "Tab2", panel, "PanelTabButtonTemplate")
+    tab2:SetPoint("LEFT", tab1, "RIGHT", -15, 0)
+    tab2:SetText("Ignored")
 
-	local tab3 = CreateFrame("Button", panel:GetName() .. "Tab3", panel, "PanelTabButtonTemplate")
-	tab3:SetPoint("LEFT", tab2, "RIGHT", -15, 0)
-	tab3:SetText("Options")
+    local tab3 = CreateFrame("Button", panel:GetName() .. "Tab3", panel, "PanelTabButtonTemplate")
+    tab3:SetPoint("LEFT", tab2, "RIGHT", -15, 0)
+    tab3:SetText("Options")
 
-	PanelTemplates_SetNumTabs(panel, 3)
-	PanelTemplates_SetTab(panel, 1)
-
-	panel.tab1, panel.tab2, panel.tab3 = tab1, tab2, tab3
-
+    PanelTemplates_SetNumTabs(panel, 3)
+    PanelTemplates_SetTab(panel, 1)
+    panel.tab1, panel.tab2, panel.tab3 = tab1, tab2, tab3
 
     local contentCompleted = CreateFrame("Frame", nil, panel)
-    contentCompleted:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -72)
-    contentCompleted:SetSize(396, 372)
+    contentCompleted:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -50)
+    contentCompleted:SetSize(396, 390)
     local contentIgnored = CreateFrame("Frame", nil, panel)
-    contentIgnored:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -72)
-    contentIgnored:SetSize(396, 372)
+    contentIgnored:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -50)
+    contentIgnored:SetSize(396, 390)
     contentIgnored:Hide()
     local contentOptions = CreateFrame("Frame", nil, panel)
-    contentOptions:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -72)
-    contentOptions:SetSize(396, 372)
+    contentOptions:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -50)
+    contentOptions:SetSize(396, 390)
     contentOptions:Hide()
     panel.contentCompleted, panel.contentIgnored, panel.contentOptions = contentCompleted, contentIgnored, contentOptions
 
     local scrollCompleted = CreateFrame("ScrollFrame", nil, contentCompleted, "UIPanelScrollFrameTemplate")
     scrollCompleted:SetPoint("TOPLEFT", contentCompleted, "TOPLEFT", 0, 0)
-    scrollCompleted:SetPoint("BOTTOMRIGHT", contentCompleted, "BOTTOMRIGHT", -24, 0)
+    scrollCompleted:SetPoint("BOTTOMRIGHT", contentCompleted, "BOTTOMRIGHT", -25, 0)
     local childCompleted = CreateFrame("Frame", nil, scrollCompleted)
     childCompleted:SetSize(396, 600)
     scrollCompleted:SetScrollChild(childCompleted)
@@ -349,33 +349,31 @@ local function CreateAlmostCompletedPanel()
 
     local scrollIgnored = CreateFrame("ScrollFrame", nil, contentIgnored, "UIPanelScrollFrameTemplate")
     scrollIgnored:SetPoint("TOPLEFT", contentIgnored, "TOPLEFT", 0, 0)
-    scrollIgnored:SetPoint("BOTTOMRIGHT", contentIgnored, "BOTTOMRIGHT", -24, 0)
+    scrollIgnored:SetPoint("BOTTOMRIGHT", contentIgnored, "BOTTOMRIGHT", -25, 0)
     local childIgnored = CreateFrame("Frame", nil, scrollIgnored)
     childIgnored:SetSize(396, 600)
     scrollIgnored:SetScrollChild(childIgnored)
     panel.scrollIgnored, panel.childIgnored = scrollIgnored, childIgnored
 
-    -- === Progress bar (replaces slider that used to live on main panel) ===
+    -- === Progress bar (forest-green fill) ===
     local scanBar = CreateFrame("StatusBar", nil, panel, "TextStatusBar")
     scanBar:SetSize(180, 18)
     scanBar:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 20, 18)
     scanBar:SetStatusBarTexture("Interface\\TARGETINGFRAME\\UI-StatusBar")
     scanBar:GetStatusBarTexture():SetHorizTile(false)
-	scanBar:GetStatusBarTexture():SetVertexColor(0, 0.8, 0.1, 1)
+    scanBar:GetStatusBarTexture():SetVertexColor(0, 0.8, 0.2, 1)   -- emerald green
     scanBar:SetMinMaxValues(0, 1)
     scanBar:SetValue(0)
     scanBar:SetMovable(false)
-    -- background for bar
     scanBar.bg = scanBar:CreateTexture(nil, "BACKGROUND")
     scanBar.bg:SetAllPoints(scanBar)
     scanBar.bg:SetColorTexture(0.1, 0.1, 0.1, 0.6)
-    -- text on bar
     scanBar.Text = scanBar:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     scanBar.Text:SetPoint("CENTER", scanBar, "CENTER", 0, 0)
     scanBar.Text:SetText("Idle")
     panel.scanBar = scanBar
 
-    -- reward-filter dropdown (anchor to progress bar so layout resembles previous)
+    -- reward-filter dropdown
     local filterDropdown = CreateFrame("Frame", nil, panel, "UIDropDownMenuTemplate")
     filterDropdown:SetPoint("BOTTOMLEFT", scanBar, "BOTTOMRIGHT", 16, -6)
     UIDropDownMenu_SetWidth(filterDropdown, 140)
@@ -389,8 +387,8 @@ local function CreateAlmostCompletedPanel()
             info.func = function()
                 ACA_FilterMode = option
                 UIDropDownMenu_SetText(filterDropdown, option)
-                ACA_Cache = {}
-                ACA.UpdatePanel(true)
+                -- no cache wipe; just re-filter
+                ACA.UpdatePanel(false)
             end
             info.checked = (ACA_FilterMode == option)
             UIDropDownMenu_AddButton(info)
@@ -414,7 +412,6 @@ local function CreateAlmostCompletedPanel()
     panel.clearAllBtn = clearAllBtn
 
     -- === Options tab contents ===
-    -- Threshold slider moved to Options tab
     local slider = CreateFrame("Slider", nil, contentOptions, "OptionsSliderTemplate")
     slider:SetPoint("TOPLEFT", contentOptions, "TOPLEFT", 12, -12)
     slider:SetWidth(220)
@@ -427,13 +424,11 @@ local function CreateAlmostCompletedPanel()
     slider.Text:SetText("Scan Threshold: " .. tostring(ACA_ScanThreshold) .. "%")
     panel.optionsSlider = slider
 
-    -- optional explanatory text in options
     local optText = contentOptions:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     optText:SetPoint("TOPLEFT", slider, "BOTTOMLEFT", 0, -12)
     optText:SetText("Set the completion % threshold used when scanning.\nChanges are debounced to avoid excessive rescans.")
     optText:SetJustifyH("LEFT")
 
-    -- tab show/hide logic
     local function ShowTab(idx)
         PanelTemplates_SetTab(panel, idx)
         if idx == 1 then
@@ -453,11 +448,10 @@ local function CreateAlmostCompletedPanel()
             refresh:Hide(); clearAllBtn:Hide()
         end
     end
-    tab1:SetScript("OnClick", function() ShowTab(1); ACA.UpdatePanel(true) end)
-    tab2:SetScript("OnClick", function() ShowTab(2); ACA.UpdatePanel(true) end)
-    tab3:SetScript("OnClick", function() ShowTab(3); ACA.UpdatePanel(true) end)
+    tab1:SetScript("OnClick", function() ShowTab(1); ACA.UpdatePanel(false) end)
+    tab2:SetScript("OnClick", function() ShowTab(2); ACA.UpdatePanel(false) end)
+    tab3:SetScript("OnClick", function() ShowTab(3); ACA.UpdatePanel(false) end)
 
-    -- slider behavior (debounced rescan) — moved to Options tab
     slider:SetScript("OnValueChanged", function(self, value)
         local v = floor(value)
         ACA_ScanThreshold = v
@@ -467,13 +461,22 @@ local function CreateAlmostCompletedPanel()
         pendingSliderRescanCancel = function() cancelled = true end
         C_Timer.After(0.5, function()
             if cancelled then return end
-            ACA_Cache = {}; ACA.UpdatePanel(true); pendingSliderRescanCancel = nil
+            ACA.scanResults = {}               -- invalidate cache
+            ACA.scanResultsForThr = nil
+            ACA.UpdatePanel(true)
+            pendingSliderRescanCancel = nil
         end)
     end)
 
-    refresh:SetScript("OnClick", function() ACA.UpdatePanel(true) end)
+    refresh:SetScript("OnClick", function()
+        ACA.scanResults = {}                   -- invalidate cache
+        ACA.scanResultsForThr = nil
+        ACA.UpdatePanel(true)
+    end)
     clearAllBtn:SetScript("OnClick", function()
-        ACA_IgnoreList = {}; ACA_Cache = {}
+        ACA_IgnoreList = {}
+        ACA.scanResults = {}                   -- invalidate cache
+        ACA.scanResultsForThr = nil
         print("ACA: Cleared ignore list.")
         ACA.UpdatePanel(true)
     end)
@@ -484,19 +487,22 @@ local function CreateAlmostCompletedPanel()
 end
 
 ----------------------------------------
--- 10.  Update panel
+-- 10.  Update panel  –  CACHE-FIRST LOGIC
 ----------------------------------------
 function ACA.UpdatePanel(forceRescan)
     local panel = CreateAlmostCompletedPanel()
     if not panel then return end
     local completedChild, ignoredChild = panel.childCompleted, panel.childIgnored
 
+    -- clear old rows
     for _, child in ipairs({ completedChild:GetChildren() }) do ReleaseRow(child) end
     for _, child in ipairs({ ignoredChild:GetChildren() }) do ReleaseRow(child) end
 
     local threshold = ACA_ScanThreshold or ACA.DEFAULT_THRESHOLD
 
-    -- Ignored tab
+    --------------------------------------------------
+    -- Ignored tab (tiny list, always rebuilt)
+    --------------------------------------------------
     if PanelTemplates_GetSelectedTab(panel) == 2 then
         local ignored = {}
         for id in pairs(ACA_IgnoreList) do
@@ -518,59 +524,67 @@ function ACA.UpdatePanel(forceRescan)
             row._ignoreButton:SetScript("OnClick", function()
                 ACA_IgnoreList[tonumber(ach.id)] = nil
                 print("ACA: Unignored " .. (ach.name or ach.id))
-                ACA_Cache = {}; ACA.UpdatePanel(true)
+                ACA.scanResults = {}               -- invalidate cache
+                ACA.scanResultsForThr = nil
+                ACA.UpdatePanel(true)
             end)
         end
         ignoredChild:SetHeight(math.max(200, (#ignored * (ACA.ROW_HEIGHT + 4)) + 20))
         return
     end
 
-    -- Completed tab (cache)
-    local cached = GetCachedResultsForThreshold(threshold)
-    if cached and not forceRescan then
-        for i, ach in ipairs(cached) do
+    --------------------------------------------------
+    -- Completed tab – cache first
+    --------------------------------------------------
+    local needFreshScan = forceRescan
+                     or not ACA.scanResultsForThr
+                     or ACA.scanResultsForThr ~= threshold
+                     or #ACA.scanResults == 0
+
+    local function display(results)
+        -- apply reward filter
+        local filtered = {}
+        local filtFn = FILTERS[ACA_FilterMode] or FILTERS["All"]
+        for _, v in ipairs(results) do
+            if filtFn(v.reward or "") then table.insert(filtered, v) end
+        end
+        sort(filtered, function(a, b) return a.percent > b.percent end)
+
+        for i, ach in ipairs(filtered) do
             local row = AcquireRow(completedChild)
             row:SetPoint("TOPLEFT", completedChild, "TOPLEFT", 6, -((i - 1) * (ACA.ROW_HEIGHT + 4) + 6))
             ACA:PopulateNativeRow(row, ach)
         end
-        completedChild:SetHeight(math.max(200, (#cached * (ACA.ROW_HEIGHT + 4)) + 20))
-        return
-    end
+        completedChild:SetHeight(math.max(200, (#filtered * (ACA.ROW_HEIGHT + 4)) + 20))
 
-    -- fresh scan
-    ScanAchievements(function(results)
-        StoreCacheForThreshold(threshold, results)
-        for i, ach in ipairs(results) do
-            local row = AcquireRow(completedChild)
-            row:SetPoint("TOPLEFT", completedChild, "TOPLEFT", 6, -((i - 1) * (ACA.ROW_HEIGHT + 4) + 6))
-            ACA:PopulateNativeRow(row, ach)
-        end
-        completedChild:SetHeight(math.max(200, (#results * (ACA.ROW_HEIGHT + 4)) + 20))
-
-        -- ensure scan bar resets to idle after completion
+        -- reset progress bar
         local p = _G[ACA_PANEL_NAME]
         if p and p.scanBar then
             p.scanBar:SetMinMaxValues(0, 1)
             p.scanBar:SetValue(0)
             p.scanBar.Text:SetText("Idle")
         end
-    end,
-    function(scanned, total)
-        local p = _G[ACA_PANEL_NAME]
-        if p and p.scanBar and p.scanBar.Text then
-            if total and total > 0 then
-                -- set range dynamically so bar fills relative to total
-                p.scanBar:SetMinMaxValues(0, total)
-                p.scanBar:SetValue(scanned)
-                local pct = (scanned / total) * 100
-                p.scanBar.Text:SetText(format("Scanning... %d/%d (%.0f%%)", scanned, total, pct))
-            else
-                p.scanBar:SetMinMaxValues(0, 1)
-                p.scanBar:SetValue(0)
-                p.scanBar.Text:SetText("Scanning... 0/0")
+    end
+
+    if needFreshScan then
+        ScanAchievements(display, function(scanned, total)
+            local p = _G[ACA_PANEL_NAME]
+            if p and p.scanBar and p.scanBar.Text then
+                if total and total > 0 then
+                    p.scanBar:SetMinMaxValues(0, total)
+                    p.scanBar:SetValue(scanned)
+                    local pct = (scanned / total) * 100
+                    p.scanBar.Text:SetText(format("Scanning... %d/%d (%.0f%%)", scanned, total, pct))
+                else
+                    p.scanBar:SetMinMaxValues(0, 1)
+                    p.scanBar:SetValue(0)
+                    p.scanBar.Text:SetText("Scanning... 0/0")
+                end
             end
-        end
-    end)
+        end)
+    else
+        display(ACA.scanResults)   -- instant re-filter
+    end
 end
 
 ----------------------------------------
@@ -600,7 +614,8 @@ loader:SetScript("OnEvent", function(self, event, arg1)
             if p then
                 p:Show()
                 PanelTemplates_SetTab(p, 1)
-                ACA.UpdatePanel(true)   -- automatic scan (remove this line if you add a toggle later)
+                -- remove the line below if you do NOT want auto-scan on first show
+                ACA.UpdatePanel(false)
             end
         end)
     end
@@ -623,10 +638,9 @@ end)
 SLASH_ALMOSTCOMPLETED1 = "/aca"
 SlashCmdList["ALMOSTCOMPLETED"] = function()
     local p = CreateAlmostCompletedPanel()
-    if p then p:Show(); ACA.UpdatePanel(true) end
+    if p then p:Show(); ACA.UpdatePanel(false) end
 end
 
 -- expose
 ACA.UpdatePanel = ACA.UpdatePanel
 ACA.GetCompletionPercent = GetCompletionPercent
-
