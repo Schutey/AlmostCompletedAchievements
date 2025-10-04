@@ -1,7 +1,6 @@
 --------------------------------------------------------------------------------
 -- AlmostCompletedAchievements
--- v1.3  –  Reward-filter edition (with Options tab + scan progress bar)
---  reward filter dropdown
+-- v1.4  –  Reward-filter edition + Options: anchor side & parse speed
 --------------------------------------------------------------------------------
 local ADDON_NAME, ACA = "AlmostCompletedAchievements", {}
 _G[ADDON_NAME] = ACA
@@ -13,6 +12,8 @@ ACA_ScanThreshold   = ACA_ScanThreshold or 80
 ACA_Cache           = ACA_Cache or {}
 ACA_IgnoreList      = ACA_IgnoreList or {}
 ACA_FilterMode      = ACA_FilterMode or "All"
+ACA_AnchorSide      = ACA_AnchorSide or "RIGHT"
+ACA_ParseSpeed      = ACA_ParseSpeed or "Smooth"
 
 ----------------------------------------
 -- 2.  Locals & API caches
@@ -29,7 +30,7 @@ local UIParentLoadAddOn = UIParentLoadAddOn
 ----------------------------------------
 -- 3.  Constants
 ----------------------------------------
-ACA.BATCH_SIZE      = 15
+ACA.BATCH_SIZE      = 20
 ACA.SCAN_DELAY      = 0.025
 ACA.SLIDER_MIN      = 50
 ACA.SLIDER_MAX      = 100
@@ -37,6 +38,15 @@ ACA.DEFAULT_THRESHOLD = 80
 ACA.CACHE_TTL       = 60 * 5
 ACA_PANEL_NAME      = "AlmostCompletedPanel"
 ACA.ROW_HEIGHT      = 44
+
+----------------------------------------
+-- 3-bis  Parse-speed presets
+----------------------------------------
+local SPEED_PRESETS = {
+    ["Fast"]   = { batch = 50, delay = 0.010, tip = "Fast scan – may drop FPS on weaker PCs." },
+    ["Smooth"] = { batch = 20, delay = 0.025, tip = "Balanced speed / smoothness (default)." },
+    ["Slow"]   = { batch = 8,  delay = 0.040, tip = "Slow scan – easiest on CPU." },
+}
 
 ----------------------------------------
 -- 4.  Reward-filter tables
@@ -302,7 +312,11 @@ local function CreateAlmostCompletedPanel()
 
     local panel = CreateFrame("Frame", ACA_PANEL_NAME, parent, "BackdropTemplate")
     panel:SetSize(420, 500)
-    panel:SetPoint("TOPLEFT", parent, "TOPRIGHT", 10, 0)
+    -- honour user anchor side
+    local side = (ACA_AnchorSide == "LEFT") and "TOPRIGHT" or "TOPLEFT"
+    local relSide = (ACA_AnchorSide == "LEFT") and "TOPLEFT" or "TOPRIGHT"
+    local xOff = (ACA_AnchorSide == "LEFT") and -10 or 10
+    panel:SetPoint(side, parent, relSide, xOff, 0)
     panel:SetBackdrop({
         bgFile = "Interface\\AchievementFrame\\UI-Achievement-Parchment-Horizontal",
         edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
@@ -418,23 +432,115 @@ local function CreateAlmostCompletedPanel()
     panel.clearAllBtn = clearAllBtn
 
     -- === Options tab contents ===
+    --------------------------------------------------
+    --  ROW 1  –  two dropdowns side by side
+    --------------------------------------------------
+    local parseLabel = contentOptions:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    parseLabel:SetPoint("TOPLEFT", contentOptions, "TOPLEFT", 12, -12)
+    parseLabel:SetText("Scan Speed:")
+
+    local parseDropdown = CreateFrame("Frame", nil, contentOptions, "UIDropDownMenuTemplate")
+    parseDropdown:SetPoint("LEFT", parseLabel, "RIGHT", -16, 0)
+    UIDropDownMenu_SetWidth(parseDropdown, 110)
+    UIDropDownMenu_SetText(parseDropdown, ACA_ParseSpeed)
+
+    local anchorLabel = contentOptions:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    anchorLabel:SetPoint("LEFT", parseDropdown, "RIGHT", 20, 0)
+    anchorLabel:SetText("Anchor:")
+
+    local anchorDropdown = CreateFrame("Frame", nil, contentOptions, "UIDropDownMenuTemplate")
+    anchorDropdown:SetPoint("LEFT", anchorLabel, "RIGHT", -16, 0)
+    UIDropDownMenu_SetWidth(anchorDropdown, 90)
+    UIDropDownMenu_SetText(anchorDropdown, ACA_AnchorSide)
+
+    --------------------------------------------------
+    --  ROW 2  –  threshold slider
+    --------------------------------------------------
     local slider = CreateFrame("Slider", nil, contentOptions, "OptionsSliderTemplate")
-    slider:SetPoint("TOPLEFT", contentOptions, "TOPLEFT", 12, -12)
-    slider:SetWidth(220)
+    slider:SetPoint("TOPLEFT", parseLabel, "BOTTOMLEFT", 0, -35)
+    slider:SetWidth(320)
     slider:SetMinMaxValues(ACA.SLIDER_MIN, ACA.SLIDER_MAX)
     slider:SetValueStep(1)
     slider:SetObeyStepOnDrag(true)
     slider:SetValue(ACA_ScanThreshold)
     slider.Text = slider:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    slider.Text:SetPoint("TOP", slider, "TOP", 0, -18)
+    slider.Text:SetPoint("BOTTOM", slider, "TOP", 0, 5)
     slider.Text:SetText("Scan Threshold: " .. tostring(ACA_ScanThreshold) .. "%")
     panel.optionsSlider = slider
 
+    --------------------------------------------------
+    --  Help text
+    --------------------------------------------------
     local optText = contentOptions:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    optText:SetPoint("TOPLEFT", slider, "BOTTOMLEFT", 0, -12)
+    optText:SetPoint("TOPLEFT", slider, "BOTTOMLEFT", 0, -15)
     optText:SetText("Set the completion % threshold used when scanning.\nChanges are debounced to avoid excessive rescans.")
     optText:SetJustifyH("LEFT")
 
+    --------------------------------------------------
+    --  Dropdown initialise / apply
+    --------------------------------------------------
+    local function ParseDropdown_Initialize(self, level)
+        local info = UIDropDownMenu_CreateInfo()
+        for _, key in ipairs({ "Fast", "Smooth", "Slow" }) do
+            info.text = key
+            info.tooltipTitle = key .. " preset"
+            info.tooltipText  = SPEED_PRESETS[key].tip
+            info.tooltipOnButton = true
+            info.func = function()
+                ACA_ParseSpeed = key
+                UIDropDownMenu_SetText(parseDropdown, key)
+                local preset = SPEED_PRESETS[key]
+                ACA.BATCH_SIZE = preset.batch
+                ACA.SCAN_DELAY = preset.delay
+            end
+            info.checked = (ACA_ParseSpeed == key)
+            UIDropDownMenu_AddButton(info)
+        end
+    end
+    UIDropDownMenu_Initialize(parseDropdown, ParseDropdown_Initialize)
+
+    local function AnchorDropdown_Initialize(self, level)
+        local info = UIDropDownMenu_CreateInfo()
+        for _, side in ipairs({ "LEFT", "RIGHT" }) do
+            info.text = side
+            info.func = function()
+                ACA_AnchorSide = side
+                UIDropDownMenu_SetText(anchorDropdown, side)
+                local p = _G[ACA_PANEL_NAME]
+                if p and AchievementFrame then
+                    p:ClearAllPoints()
+                    p:SetPoint(side == "RIGHT" and "TOPLEFT" or "TOPRIGHT",
+                               AchievementFrame,
+                               side == "RIGHT" and "TOPRIGHT" or "TOPLEFT",
+                               side == "RIGHT" and 10 or -10, 0)
+                end
+            end
+            info.checked = (ACA_AnchorSide == side)
+            UIDropDownMenu_AddButton(info)
+        end
+    end
+    UIDropDownMenu_Initialize(anchorDropdown, AnchorDropdown_Initialize)
+
+    --------------------------------------------------
+    --  Slider value changed
+    --------------------------------------------------
+    slider:SetScript("OnValueChanged", function(self, value)
+        local v = floor(value)
+        ACA_ScanThreshold = v
+        self.Text:SetText("Scan Threshold: " .. v .. "%")
+        if pendingSliderRescanCancel then pendingSliderRescanCancel() end
+        local cancelled = false
+        pendingSliderRescanCancel = function() cancelled = true end
+        C_Timer.After(0.5, function()
+            if cancelled then return end
+            ACA.scanResults = {}
+            ACA.scanResultsForThr = nil
+            ACA.UpdatePanel(true)
+            pendingSliderRescanCancel = nil
+        end)
+    end)
+
+    -- === tab-switch handler ===
     local function ShowTab(idx)
         PanelTemplates_SetTab(panel, idx)
         if idx == 1 then
@@ -457,22 +563,6 @@ local function CreateAlmostCompletedPanel()
     tab1:SetScript("OnClick", function() ShowTab(1); ACA.UpdatePanel(false) end)
     tab2:SetScript("OnClick", function() ShowTab(2); ACA.UpdatePanel(false) end)
     tab3:SetScript("OnClick", function() ShowTab(3); ACA.UpdatePanel(false) end)
-
-    slider:SetScript("OnValueChanged", function(self, value)
-        local v = floor(value)
-        ACA_ScanThreshold = v
-        self.Text:SetText("Scan Threshold: " .. v .. "%")
-        if pendingSliderRescanCancel then pendingSliderRescanCancel() end
-        local cancelled = false
-        pendingSliderRescanCancel = function() cancelled = true end
-        C_Timer.After(0.5, function()
-            if cancelled then return end
-            ACA.scanResults = {}
-            ACA.scanResultsForThr = nil
-            ACA.UpdatePanel(true)
-            pendingSliderRescanCancel = nil
-        end)
-    end)
 
     refresh:SetScript("OnClick", function()
         ACA.scanResults = {}
@@ -561,9 +651,9 @@ function ACA.UpdatePanel(forceRescan)
         end
         completedChild:SetHeight(math.max(200, (#filtered * (ACA.ROW_HEIGHT + 4)) + 20))
 
-        -- reset progress bar
+        -- reset progress bar (only on Completed tab)
         local p = _G[ACA_PANEL_NAME]
-        if p and p.scanBar then
+        if p and p.scanBar and PanelTemplates_GetSelectedTab(p) == 1 then
             p.scanBar:SetMinMaxValues(0, 1)
             p.scanBar:SetValue(0)
             p.scanBar.Text:SetText("Idle")
@@ -602,6 +692,8 @@ loader:SetScript("OnEvent", function(self, event, arg1)
         ACA_Cache           = ACA_Cache or {}
         ACA_IgnoreList      = ACA_IgnoreList or {}
         ACA_FilterMode      = ACA_FilterMode or "All"
+        ACA_AnchorSide      = ACA_AnchorSide or "RIGHT"
+        ACA_ParseSpeed      = ACA_ParseSpeed or "Smooth"
         if ACA_Blacklist and type(ACA_Blacklist)=="table" then
             for id in pairs(ACA_Blacklist) do
                 ACA_IgnoreList[tonumber(id)] = true
