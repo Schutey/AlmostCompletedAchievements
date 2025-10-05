@@ -32,7 +32,7 @@ local UIParentLoadAddOn = UIParentLoadAddOn
 ----------------------------------------
 ACA.BATCH_SIZE      = 20
 ACA.SCAN_DELAY      = 0.025
-ACA.SLIDER_MIN      = 50
+ACA.SLIDER_MIN      = 0
 ACA.SLIDER_MAX      = 100
 ACA.DEFAULT_THRESHOLD = 80
 ACA.CACHE_TTL       = 60 * 5
@@ -774,3 +774,4 @@ end
 -- expose
 ACA.UpdatePanel = ACA.UpdatePanel
 ACA.GetCompletionPercent = GetCompletionPercent
+
