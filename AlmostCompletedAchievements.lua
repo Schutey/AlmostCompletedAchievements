@@ -225,13 +225,21 @@ function ACA:PopulateNativeRow(row, ach)
         end
     end)
 
-    row._ignoreButton:SetScript("OnClick", function()
-        ACA_IgnoreList[tonumber(ach.id)] = (not ACA_IgnoreList[tonumber(ach.id)]) or nil
-        print(format("ACA: %s %s", ACA_IgnoreList[tonumber(ach.id)] and "Ignored" or "Unignored", ach.name or ach.id))
-        ACA.scanResults = {}               -- invalidate cache
-        ACA.scanResultsForThr = nil
-        ACA.UpdatePanel(true)
-    end)
+row._ignoreButton:SetScript("OnClick", function()
+    local id = tonumber(ach.id)
+    ACA_IgnoreList[id] = true
+    print(format("ACA: Ignored %s", ach.name or ach.id))
+
+    -- Remove from current scanResults so it disappears immediately
+    for i = #ACA.scanResults, 1, -1 do
+        if ACA.scanResults[i].id == id then
+            table.remove(ACA.scanResults, i)
+            break
+        end
+    end
+
+    ACA.UpdatePanel(false) -- UI refresh only
+end)
     row._ignoreButton:SetText(ACA_IgnoreList[tonumber(ach.id)] and "✓" or "X")
 end
 
@@ -348,14 +356,14 @@ local function CreateAlmostCompletedPanel()
     panel.tab1, panel.tab2, panel.tab3 = tab1, tab2, tab3
 
     local contentCompleted = CreateFrame("Frame", nil, panel)
-    contentCompleted:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -50)
+    contentCompleted:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -40)
     contentCompleted:SetSize(396, 390)
     local contentIgnored = CreateFrame("Frame", nil, panel)
-    contentIgnored:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -50)
+    contentIgnored:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -40)
     contentIgnored:SetSize(396, 390)
     contentIgnored:Hide()
     local contentOptions = CreateFrame("Frame", nil, panel)
-    contentOptions:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -50)
+    contentOptions:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -40)
     contentOptions:SetSize(396, 390)
     contentOptions:Hide()
     panel.contentCompleted, panel.contentIgnored, panel.contentOptions = contentCompleted, contentIgnored, contentOptions
@@ -379,7 +387,7 @@ local function CreateAlmostCompletedPanel()
     -- === Progress bar (forest-green fill) ===
     local scanBar = CreateFrame("StatusBar", nil, panel, "TextStatusBar")
     scanBar:SetSize(180, 18)
-    scanBar:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 20, 18)
+    scanBar:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 20, 45)
     scanBar:SetStatusBarTexture("Interface\\TARGETINGFRAME\\UI-StatusBar")
     scanBar:GetStatusBarTexture():SetHorizTile(false)
     scanBar:GetStatusBarTexture():SetVertexColor(0, 0.8, 0.2, 1)   -- emerald green
@@ -394,12 +402,27 @@ local function CreateAlmostCompletedPanel()
     scanBar.Text:SetText("Idle")
     panel.scanBar = scanBar
 
+    -- rescan / refresh button
+    local refresh = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+    refresh:SetSize(100, 24)
+    refresh:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 18, 14)
+    refresh:SetText("Rescan")
+    refresh:GetFontString():SetTextColor(1, 1, 1)
+    panel.refresh = refresh
+
     -- reward-filter dropdown
-    local filterDropdown = CreateFrame("Frame", nil, panel, "UIDropDownMenuTemplate")
-    filterDropdown:SetPoint("BOTTOMLEFT", scanBar, "BOTTOMRIGHT", 16, -6)
-    UIDropDownMenu_SetWidth(filterDropdown, 140)
-    UIDropDownMenu_SetText(filterDropdown, ACA_FilterMode)
-    panel.filterDropdown = filterDropdown
+-- Label above the dropdown
+local filterLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+filterLabel:SetPoint("BOTTOMLEFT", scanBar, "BOTTOMRIGHT", 16, 10)
+filterLabel:SetText("Filter by:")
+filterLabel:SetTextColor(1, 1, 1) -- pure white
+
+-- Dropdown itself
+local filterDropdown = CreateFrame("Frame", nil, panel, "UIDropDownMenuTemplate")
+filterDropdown:SetPoint("TOPLEFT", filterLabel, "BOTTOMLEFT", -16, -4)
+UIDropDownMenu_SetWidth(filterDropdown, 140)
+UIDropDownMenu_SetText(filterDropdown, ACA_FilterMode)
+panel.filterDropdown = filterDropdown
 
     local function FilterDropdown_Initialize(self, level)
         local info = UIDropDownMenu_CreateInfo()
@@ -416,17 +439,10 @@ local function CreateAlmostCompletedPanel()
     end
     UIDropDownMenu_Initialize(filterDropdown, FilterDropdown_Initialize)
 
-    -- refresh / clear buttons
-    local refresh = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
-    refresh:SetSize(80, 22)
-    refresh:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -10, -10)
-    refresh:SetText("Rescan")
-    refresh:GetFontString():SetTextColor(1, 1, 1)
-    panel.refresh = refresh
-
+    -- clear button
     local clearAllBtn = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
     clearAllBtn:SetSize(100, 24)
-    clearAllBtn:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 14, 14)
+    clearAllBtn:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 18, 14)
     clearAllBtn:SetText("Clear All")
     clearAllBtn:Hide()
     panel.clearAllBtn = clearAllBtn
@@ -528,16 +544,7 @@ local function CreateAlmostCompletedPanel()
         local v = floor(value)
         ACA_ScanThreshold = v
         self.Text:SetText("Scan Threshold: " .. v .. "%")
-        if pendingSliderRescanCancel then pendingSliderRescanCancel() end
-        local cancelled = false
-        pendingSliderRescanCancel = function() cancelled = true end
-        C_Timer.After(0.5, function()
-            if cancelled then return end
-            ACA.scanResults = {}
-            ACA.scanResultsForThr = nil
-            ACA.UpdatePanel(true)
-            pendingSliderRescanCancel = nil
-        end)
+        -- No scan triggered here
     end)
 
     -- === tab-switch handler ===
@@ -614,13 +621,28 @@ function ACA.UpdatePanel(forceRescan)
             row:SetPoint("TOPLEFT", ignoredChild, "TOPLEFT", 6, -((i - 1) * (ACA.ROW_HEIGHT + 4) + 6))
             ACA:PopulateNativeRow(row, ach)
             row._ignoreButton:SetText("✓")
-            row._ignoreButton:SetScript("OnClick", function()
-                ACA_IgnoreList[tonumber(ach.id)] = nil
-                print("ACA: Unignored " .. (ach.name or ach.id))
-                ACA.scanResults = {}
-                ACA.scanResultsForThr = nil
-                ACA.UpdatePanel(true)
-            end)
+row._ignoreButton:SetScript("OnClick", function()
+    local id = tonumber(ach.id)
+    ACA_IgnoreList[id] = nil
+    print("ACA: Unignored " .. (ach.name or ach.id))
+
+    -- Add back to scanResults if it meets the threshold
+    local percent = GetCompletionPercent(id)
+    if percent >= ACA_ScanThreshold then
+        local _, name, _, _, _, _, _, _, _, icon, rewardText = GetAchievementInfo(id)
+        if not rewardText then
+            local all = { GetAchievementInfo(id) }
+            rewardText = all[11] or all[12] or all[13] or ""
+        end
+        table.insert(ACA.scanResults, {
+            id = id, name = name or ("[" .. tostring(id) .. "]"),
+            percent = percent, category = ach.category or 0,
+            icon = icon, reward = rewardText
+        })
+    end
+
+    ACA.UpdatePanel(false)  -- UI refresh only
+end)
         end
         ignoredChild:SetHeight(math.max(200, (#ignored * (ACA.ROW_HEIGHT + 4)) + 20))
         return
@@ -631,7 +653,6 @@ function ACA.UpdatePanel(forceRescan)
     --------------------------------------------------
     local needFreshScan = forceRescan
                      or not ACA.scanResultsForThr
-                     or ACA.scanResultsForThr ~= threshold
                      or #ACA.scanResults == 0
 
     local function display(results)
