@@ -73,3 +73,16 @@ Appearance
 - Automatically returns to “Idle” when scan finishes.
 - Adjust Text formatting on listed achievements for better readability
 
+## Version 1.4
+Schutey:
+- Changing slider, ignoring or unignoring achievements does not trigger rescan
+- moved rescan button down, matched size/location with clear all button
+- added title to filter dropdown and adjusted location/spacing
+- changed X and checkmark buttons to use default UI textures, as the checkmark was showing up as a box for me
+- set slider min to 0
+Kagrok:
+- Reformatted options panel for better readability
+- updated help text for slider
+- added slash commands with fallback for bad commands help text
+- added slash command help text to options panel
+- forced reinitialize for options elements affected by slash commands to force them to reflect changes immediately.
