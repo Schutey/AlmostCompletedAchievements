@@ -3,7 +3,9 @@
 ## Notes: Highlights achievements that are nearly complete.
 ## Version: 1.3.5
 ## Author: Schutey & Kagrok
+## IconTexture: Interface\AddOns\AlmostCompletedAchievements\Media\icon.png
 
 ## SavedVariablesPerCharacter: ACA_ScanThreshold, ACA_Cache, ACA_IgnoreList, ACA_SortMode
 
 AlmostCompletedAchievements.lua
+
