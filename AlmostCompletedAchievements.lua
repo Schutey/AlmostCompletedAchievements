@@ -240,7 +240,21 @@ row._ignoreButton:SetScript("OnClick", function()
 
     ACA.UpdatePanel(false) -- UI refresh only
 end)
-    row._ignoreButton:SetText(ACA_IgnoreList[tonumber(ach.id)] and "✓" or "X")
+
+-- Create icon once
+if not row._ignoreButton.icon then
+    row._ignoreButton.icon = row._ignoreButton:CreateTexture(nil, "ARTWORK")
+    row._ignoreButton.icon:SetSize(16, 16)
+    row._ignoreButton.icon:SetPoint("CENTER", row._ignoreButton, "CENTER", 0, 0)
+end
+
+-- Update icon based on ignore state
+if ACA_IgnoreList[tonumber(ach.id)] then
+    row._ignoreButton.icon:SetTexture("Interface\\Buttons\\UI-CheckBox-Check") -- checkmark
+else
+    row._ignoreButton.icon:SetTexture("Interface\\Buttons\\UI-StopButton") -- red X style
+end
+
 end
 
 ----------------------------------------
@@ -620,7 +634,7 @@ function ACA.UpdatePanel(forceRescan)
             local row = AcquireRow(ignoredChild)
             row:SetPoint("TOPLEFT", ignoredChild, "TOPLEFT", 6, -((i - 1) * (ACA.ROW_HEIGHT + 4) + 6))
             ACA:PopulateNativeRow(row, ach)
-            row._ignoreButton:SetText("✓")
+            row._ignoreButton:SetText("")
 row._ignoreButton:SetScript("OnClick", function()
     local id = tonumber(ach.id)
     ACA_IgnoreList[id] = nil
