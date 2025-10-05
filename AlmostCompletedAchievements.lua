@@ -1,6 +1,6 @@
 --------------------------------------------------------------------------------
 -- AlmostCompletedAchievements
--- v1.4  –  Reward-filter edition + Options: anchor side & parse speed
+-- v1.4  –  Slash Commands!
 --------------------------------------------------------------------------------
 local ADDON_NAME, ACA = "AlmostCompletedAchievements", {}
 _G[ADDON_NAME] = ACA
@@ -103,6 +103,24 @@ local function StoreCacheForThreshold(th, res)
     ACA_Cache[tostring(th)] = { results = res, timestamp = time() }
 end
 
+----------------------------------------
+--  UI-sync helpers  (re-initialize to force visible update)
+----------------------------------------
+local function RefreshParseDropdown()
+    local dd = _G["ACAParseDrop"]
+    if not dd then return end
+    UIDropDownMenu_Initialize(dd, ParseDropdown_Initialize)
+    UIDropDownMenu_SetSelectedValue(dd, ACA_ParseSpeed)
+    UIDropDownMenu_SetText(dd, ACA_ParseSpeed)
+end
+
+local function RefreshAnchorDropdown()
+    local dd = _G["ACAAnchorDrop"]
+    if not dd then return end
+    UIDropDownMenu_Initialize(dd, AnchorDropdown_Initialize)
+    UIDropDownMenu_SetSelectedValue(dd, ACA_AnchorSide)
+    UIDropDownMenu_SetText(dd, ACA_AnchorSide)
+end
 ----------------------------------------
 -- 6.  Row pool
 ----------------------------------------
@@ -464,48 +482,105 @@ panel.filterDropdown = filterDropdown
 
     -- === Options tab contents ===
     --------------------------------------------------
-    --  ROW 1  –  two dropdowns side by side
+	--  ROW 1  –  two dropdowns side by side
+	--------------------------------------------------
+	local parseLabel = contentOptions:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+	parseLabel:SetPoint("TOPLEFT", contentOptions, "TOPLEFT", 12, -12)
+	parseLabel:SetText("Scan Speed:")
+
+	-- create dropdowns **now** but parent them to contentOptions later
+	local parseDropdown = CreateFrame("Frame", "ACAParseDrop", contentOptions, "UIDropDownMenuTemplate")
+	parseDropdown:SetPoint("LEFT", parseLabel, "RIGHT", -16, 0)
+	UIDropDownMenu_SetWidth(parseDropdown, 110)
+	UIDropDownMenu_SetText(parseDropdown, ACA_ParseSpeed)
+
+	local anchorLabel = contentOptions:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+	anchorLabel:SetPoint("LEFT", parseDropdown, "RIGHT", 20, 0)
+	anchorLabel:SetText("Anchor:")
+
+	local anchorDropdown = CreateFrame("Frame", "ACAAnchorDrop", contentOptions, "UIDropDownMenuTemplate")
+	anchorDropdown:SetPoint("LEFT", anchorLabel, "RIGHT", -16, 0)
+	UIDropDownMenu_SetWidth(anchorDropdown, 90)
+	UIDropDownMenu_SetText(anchorDropdown, ACA_AnchorSide)
+
+	panel.parseDropdown = parseDropdown
+	panel.anchorDropdown = anchorDropdown
+	
+	    --------------------------------------------------
+    --  Help text (now ABOVE the box)
     --------------------------------------------------
-    local parseLabel = contentOptions:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    parseLabel:SetPoint("TOPLEFT", contentOptions, "TOPLEFT", 12, -12)
-    parseLabel:SetText("Scan Speed:")
+    local optText = contentOptions:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    optText:SetPoint("TOP", contentOptions, "TOP", 0, -50) 
+    optText:SetText("Set the completion % threshold used when scanning.")
+    optText:SetJustifyH("LEFT")
 
-    local parseDropdown = CreateFrame("Frame", nil, contentOptions, "UIDropDownMenuTemplate")
-    parseDropdown:SetPoint("LEFT", parseLabel, "RIGHT", -16, 0)
-    UIDropDownMenu_SetWidth(parseDropdown, 110)
-    UIDropDownMenu_SetText(parseDropdown, ACA_ParseSpeed)
-
-    local anchorLabel = contentOptions:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    anchorLabel:SetPoint("LEFT", parseDropdown, "RIGHT", 20, 0)
-    anchorLabel:SetText("Anchor:")
-
-    local anchorDropdown = CreateFrame("Frame", nil, contentOptions, "UIDropDownMenuTemplate")
-    anchorDropdown:SetPoint("LEFT", anchorLabel, "RIGHT", -16, 0)
-    UIDropDownMenu_SetWidth(anchorDropdown, 90)
-    UIDropDownMenu_SetText(anchorDropdown, ACA_AnchorSide)
-
+	--------------------------------------------------
+    --  ROW 2  –  threshold slider (centered + backdrop)
     --------------------------------------------------
-    --  ROW 2  –  threshold slider
-    --------------------------------------------------
-    local slider = CreateFrame("Slider", nil, contentOptions, "OptionsSliderTemplate")
-    slider:SetPoint("TOPLEFT", parseLabel, "BOTTOMLEFT", 0, -35)
+    -- container frame so we can give the slider its own backdrop
+    local sliderBox = CreateFrame("Frame", nil, contentOptions, "BackdropTemplate")
+    sliderBox:SetSize(340, 64)                                    -- wide enough for the slider + text
+    sliderBox:SetPoint("TOP", contentOptions, "TOP", 0, -70)    -- centred horizontally, same vertical offset as before
+    sliderBox:SetBackdrop({
+        bgFile   = "Interface\\Tooltips\\UI-Tooltip-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = false, edgeSize = 12,
+        insets = { left = 4, right = 4, top = 4, bottom = 4 }
+    })
+    sliderBox:SetBackdropColor(0.1, 0.1, 0.1, 0.4)              -- darkish tint
+    sliderBox:SetBackdropBorderColor(0.4, 0.4, 0.4)
+
+    -- the slider itself
+    local slider = CreateFrame("Slider", nil, sliderBox, "OptionsSliderTemplate")
+    slider:SetPoint("CENTER", sliderBox, "CENTER", 0, 0)          -- centred inside the box
     slider:SetWidth(320)
     slider:SetMinMaxValues(ACA.SLIDER_MIN, ACA.SLIDER_MAX)
     slider:SetValueStep(1)
     slider:SetObeyStepOnDrag(true)
     slider:SetValue(ACA_ScanThreshold)
+
+    -- label above the slider
     slider.Text = slider:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
     slider.Text:SetPoint("BOTTOM", slider, "TOP", 0, 5)
     slider.Text:SetText("Scan Threshold: " .. tostring(ACA_ScanThreshold) .. "%")
-    panel.optionsSlider = slider
+    panel.optionsSlider = slider          -- keep the old reference so the rest of the code still works
 
+	--------------------------------------------------
+    --  Slash-command help panel (under the slider)
     --------------------------------------------------
-    --  Help text
+    local helpBox = CreateFrame("Frame", nil, contentOptions, "BackdropTemplate")
+    helpBox:SetSize(340, 80)                                      -- roomy enough for six lines
+    helpBox:SetPoint("TOP", sliderBox, "BOTTOM", 0, -20)        -- sits right under the slider box
+    helpBox:SetBackdrop({
+        bgFile   = "Interface\\Tooltips\\UI-Tooltip-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = false, edgeSize = 10,
+        insets   = { left = 4, right = 4, top = 4, bottom = 4 }
+    })
+    helpBox:SetBackdropColor(0.1, 0.1, 0.1, 0.4)                -- colour you asked for
+    helpBox:SetBackdropBorderColor(0.4, 0.4, 0.4)
+
+    local helpText = helpBox:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    helpText:SetPoint("TOPLEFT", helpBox, "TOPLEFT", 10, -10)
+    helpText:SetJustifyH("LEFT")
+    helpText:SetText(
+        "Slash commands:\n"..
+        "/aca default          – reset all options\n"..
+        "/aca anchorreset      – anchor to right side\n"..
+        "/aca ignore <ID>      – ignore achievement\n"..
+        "/aca restore <ID>     – un-ignore achievement\n"..
+        "/aca scanspeed <Fast | Smooth | Slow>"
+    )
+	
     --------------------------------------------------
-    local optText = contentOptions:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    optText:SetPoint("TOPLEFT", slider, "BOTTOMLEFT", 0, -15)
-    optText:SetText("Set the completion % threshold used when scanning.\nChanges are debounced to avoid excessive rescans.")
-    optText:SetJustifyH("LEFT")
+    --  Slider value changed (same handler as before)
+    --------------------------------------------------
+    slider:SetScript("OnValueChanged", function(self, value)
+        local v = floor(value)
+        ACA_ScanThreshold = v
+        self.Text:SetText("Scan Threshold: " .. v .. "%")
+        -- No scan triggered here
+    end)
 
     --------------------------------------------------
     --  Dropdown initialise / apply
@@ -551,16 +626,6 @@ panel.filterDropdown = filterDropdown
         end
     end
     UIDropDownMenu_Initialize(anchorDropdown, AnchorDropdown_Initialize)
-
-    --------------------------------------------------
-    --  Slider value changed
-    --------------------------------------------------
-    slider:SetScript("OnValueChanged", function(self, value)
-        local v = floor(value)
-        ACA_ScanThreshold = v
-        self.Text:SetText("Scan Threshold: " .. v .. "%")
-        -- No scan triggered here
-    end)
 
     -- === tab-switch handler ===
     local function ShowTab(idx)
@@ -772,11 +837,133 @@ login:SetScript("OnEvent", function(_, _)
     end)
 end)
 
-SLASH_ALMOSTCOMPLETED1 = "/aca"
-SlashCmdList["ALMOSTCOMPLETED"] = function()
-    local p = CreateAlmostCompletedPanel()
-    if p then p:Show(); ACA.UpdatePanel(false) end
+	--------------------------------------------------
+	--  Slash dispatcher
+	--------------------------------------------------
+	local function SlashCmd(msg)
+    local cmd, arg1 = strsplit(" ", strtrim(msg or ""), 2)
+    cmd = strlower(cmd or "")
+
+
+    --------------------------------------------------
+    --  no args  –  show UI
+    --------------------------------------------------
+    if cmd == "" or cmd == "show" then
+        local p = CreateAlmostCompletedPanel()
+        if p then p:Show(); ACA.UpdatePanel(false) end
+        return
+    end
+
+    --------------------------------------------------
+    --  /aca default
+    --------------------------------------------------
+    if cmd == "default" then
+        ACA_ScanThreshold = ACA.DEFAULT_THRESHOLD
+        ACA_ParseSpeed      = "Smooth"
+        ACA_AnchorSide      = "RIGHT"
+        ACA_FilterMode      = "All"
+        ACA_IgnoreList      = {}          -- clear ignores too
+        -- apply speed constants immediately
+        local p = SPEED_PRESETS.Smooth
+        ACA.BATCH_SIZE, ACA.SCAN_DELAY = p.batch, p.delay
+        -- refresh UI if shown
+        local panel = _G[ACA_PANEL_NAME]
+        if panel and panel:IsShown() then ACA.UpdatePanel(true) end
+        print("ACA: all settings reset to default.")
+        return
+    end
+
+     --------------------------------------------------
+    --  /aca anchorreset
+    --------------------------------------------------
+    if cmd == "anchorreset" then
+        ACA_AnchorSide = "RIGHT"
+        local panel = _G[ACA_PANEL_NAME]
+        if panel and AchievementFrame then
+            panel:ClearAllPoints()
+            panel:SetPoint("TOPLEFT", AchievementFrame, "TOPRIGHT", 10, 0)
+        end
+        RefreshAnchorDropdown()             -- <-- HERE
+        print("ACA: anchor reset to RIGHT.")
+        return
+    end
+
+    --------------------------------------------------
+    --  /aca ignore <id>
+    --------------------------------------------------
+    if cmd == "ignore" then
+        local id = tonumber(arg1)
+        if not id then print("ACA: usage /aca ignore <achievementID>"); return end
+        ACA_IgnoreList[id] = true
+        print(format("ACA: ignored achievement %d.", id))
+        -- remove from current scan results instantly
+        for i = #ACA.scanResults, 1, -1 do
+            if ACA.scanResults[i].id == id then table.remove(ACA.scanResults, i) end
+        end
+        local panel = _G[ACA_PANEL_NAME]
+        if panel and panel:IsShown() then ACA.UpdatePanel(false) end
+        return
+    end
+
+    --------------------------------------------------
+    --  /aca restore <id>
+    --------------------------------------------------
+    if cmd == "restore" then
+        local id = tonumber(arg1)
+        if not id then print("ACA: usage /aca restore <achievementID>"); return end
+        if not ACA_IgnoreList[id] then
+            print(format("ACA: achievement %d was not ignored.", id)); return
+        end
+        ACA_IgnoreList[id] = nil
+        -- if it now meets threshold, put it back into results
+        local pct = GetCompletionPercent(id)
+        if pct >= (ACA_ScanThreshold or ACA.DEFAULT_THRESHOLD) then
+            local _, name, _, _, _, _, _, _, _, icon, rewardText = GetAchievementInfo(id)
+            if not rewardText then
+                local all = { GetAchievementInfo(id) }
+                rewardText = all[11] or all[12] or all[13] or ""
+            end
+            table.insert(ACA.scanResults, {
+                id = id, name = name or ("["..id.."]"), percent = pct,
+                category = 0, icon = icon, reward = rewardText
+            })
+        end
+        print(format("ACA: restored achievement %d.", id))
+        local panel = _G[ACA_PANEL_NAME]
+        if panel and panel:IsShown() then ACA.UpdatePanel(false) end
+        return
+    end
+
+    --------------------------------------------------
+    --  /aca scanspeed Fast|Smooth|Slow
+    --------------------------------------------------
+    if cmd == "scanspeed" then
+        local key = strtrim(strlower(arg1 or ""))
+        local realKey = ({ fast = "Fast", smooth = "Smooth", slow = "Slow" })[key]
+        if not realKey then
+            print("ACA: usage /aca scanspeed <Fast | Smooth | Slow>"); return
+        end
+        ACA_ParseSpeed = realKey
+        local p = SPEED_PRESETS[realKey]
+        ACA.BATCH_SIZE, ACA.SCAN_DELAY = p.batch, p.delay
+        RefreshParseDropdown()              -- <-- HERE
+        print(format("ACA: scan speed set to %s.", realKey))
+        return
+    end
+
+    --------------------------------------------------
+    --  unknown verb
+    --------------------------------------------------
+    print("ACA: unknown command.  Usage:")
+    print("  /aca default          – reset all options")
+    print("  /aca anchorreset      – anchor to right side")
+    print("  /aca ignore <ID>      – ignore achievement")
+    print("  /aca restore <ID>     – un-ignore achievement")
+    print("  /aca scanspeed <Fast | Smooth | Slow>")
 end
+
+SLASH_ALMOSTCOMPLETED1 = "/aca"
+SlashCmdList["ALMOSTCOMPLETED"] = SlashCmd
 
 -- expose
 ACA.UpdatePanel = ACA.UpdatePanel
