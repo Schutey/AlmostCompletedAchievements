@@ -1,6 +1,4 @@
-# Almost Completed Achievements
-Version 2.0
-
+# Almost Completed Achievements v2.0
 Completely Rewritten!
 
 ## CORE FUNCTIONALITY
