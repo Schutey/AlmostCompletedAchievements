@@ -430,6 +430,7 @@ local filterLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
 filterLabel:SetPoint("BOTTOMLEFT", scanBar, "BOTTOMRIGHT", 16, 10)
 filterLabel:SetText("Filter by:")
 filterLabel:SetTextColor(1, 1, 1) -- pure white
+panel.filterLabel = filterLabel
 
 -- Dropdown itself
 local filterDropdown = CreateFrame("Frame", nil, panel, "UIDropDownMenuTemplate")
@@ -568,16 +569,22 @@ panel.filterDropdown = filterDropdown
             contentCompleted:Show(); contentIgnored:Hide(); contentOptions:Hide()
             panel.scanBar:Show()
             panel.optionsSlider:Hide()
+            panel.filterDropdown:Show()
+            if panel.filterLabel then panel.filterLabel:Show() end
             refresh:Show(); clearAllBtn:Hide()
         elseif idx == 2 then
             contentCompleted:Hide(); contentIgnored:Show(); contentOptions:Hide()
             panel.scanBar:Hide()
             panel.optionsSlider:Hide()
+            panel.filterDropdown:Hide()
+            if panel.filterLabel then panel.filterLabel:Hide() end
             refresh:Hide(); clearAllBtn:Show()
         else -- idx == 3 (Options)
             contentCompleted:Hide(); contentIgnored:Hide(); contentOptions:Show()
             panel.scanBar:Hide()
             panel.optionsSlider:Show()
+            panel.filterDropdown:Hide()
+            if panel.filterLabel then panel.filterLabel:Hide() end
             refresh:Hide(); clearAllBtn:Hide()
         end
     end
@@ -774,4 +781,3 @@ end
 -- expose
 ACA.UpdatePanel = ACA.UpdatePanel
 ACA.GetCompletionPercent = GetCompletionPercent
-
