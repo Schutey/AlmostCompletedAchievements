@@ -1,6 +1,6 @@
 --------------------------------------------------------------------------------
 -- AlmostCompletedAchievements
--- v2.0
+-- v2.0.1 --Midnight prepatch housing prep and bugfixes
 --------------------------------------------------------------------------------
 local ADDON_NAME, ACA = "AlmostCompletedAchievements", {}
 _G[ADDON_NAME] = ACA
@@ -995,4 +995,5 @@ SlashCmdList["ALMOSTCOMPLETED"] = SlashCmd
 -- expose
 ACA.UpdatePanel = ACA.UpdatePanel
 ACA.GetCompletionPercent = GetCompletionPercent
+
 
