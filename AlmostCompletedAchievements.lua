@@ -56,19 +56,20 @@ local FILTERS = {
     ["Any reward"]          = function(r) return r ~= "" end,
     ["Mount"]               = function(r) return r:find("Mount") end,
     ["Title"]               = function(r) return r:find("Title") end,
+	["Pet"]                 = function(r) return r:find("Pet") end,
     ["Appearance"]          = function(r) return r:find("Appearance") end,
     ["Drake Customization"] = function(r) return r:find("Drake Customization") end,
-    ["Pet"]                 = function(r) return r:find("Pet") end,
+    ["Decor"]               = function(r) return r:find("Decor") end,
     ["Warband Campsite"]    = function(r) return r:find("Campsite") end,
     ["Other"]               = function(r)
         if r == "" then return false end
-        return not (r:find("Mount") or r:find("Title") or r:find("Appearance") or
-                    r:find("Drake Customization") or r:find("Pet") or r:find("Campsite"))
+        return not (r:find("Mount") or r:find("Title") or r:find("Pet") or r:find("Appearance") or
+                    r:find("Drake Customization") or r:find("Decor") or r:find("Campsite"))
     end,
 }
 local FILTER_LIST = {
-    "All", "Any reward", "Mount", "Title", "Appearance",
-    "Drake Customization", "Pet", "Warband Campsite", "Other"
+    "All", "Any reward", "Mount", "Title", "Pet", "Appearance",
+    "Drake Customization", "Decor", "Warband Campsite", "Other"
 }
 
 ----------------------------------------
@@ -968,4 +969,5 @@ SlashCmdList["ALMOSTCOMPLETED"] = SlashCmd
 -- expose
 ACA.UpdatePanel = ACA.UpdatePanel
 ACA.GetCompletionPercent = GetCompletionPercent
+
 
