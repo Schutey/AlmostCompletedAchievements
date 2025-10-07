@@ -859,22 +859,43 @@ end)
     --  /aca default
     --------------------------------------------------
     if cmd == "default" then
-        ACA_ScanThreshold = ACA.DEFAULT_THRESHOLD
-        ACA_ParseSpeed      = "Smooth"
-        ACA_AnchorSide      = "RIGHT"
-        ACA_FilterMode      = "All"
-        ACA_IgnoreList      = {}          -- clear ignores too
-        -- apply speed constants immediately
-        local p = SPEED_PRESETS.Smooth
-        ACA.BATCH_SIZE, ACA.SCAN_DELAY = p.batch, p.delay
-        -- refresh UI if shown
-        local panel = _G[ACA_PANEL_NAME]
-        if panel and panel:IsShown() then ACA.UpdatePanel(true) end
-        print("ACA: all settings reset to default.")
-        return
+    -- Reset saved variables (except ignore list)
+    ACA_ScanThreshold = ACA.DEFAULT_THRESHOLD
+    ACA_ParseSpeed    = "Smooth"
+    ACA_AnchorSide    = "RIGHT"
+    ACA_FilterMode    = "All"
+    -- ACA_IgnoreList = {}  -- keep existing ignores
+
+    -- Apply speed constants
+    local p = SPEED_PRESETS.Smooth
+    ACA.BATCH_SIZE, ACA.SCAN_DELAY = p.batch, p.delay
+
+    -- Re-anchor panel if visible
+    local panel = _G[ACA_PANEL_NAME]
+    if panel and AchievementFrame then
+        panel:ClearAllPoints()
+        panel:SetPoint("TOPLEFT", AchievementFrame, "TOPRIGHT", 10, 0)
     end
 
-     --------------------------------------------------
+    -- Refresh dropdowns and slider
+    RefreshParseDropdown()
+    RefreshAnchorDropdown()
+    if panel and panel.optionsSlider then
+        panel.optionsSlider:SetValue(ACA_ScanThreshold)
+        panel.optionsSlider.Text:SetText("Scan Threshold: " .. ACA_ScanThreshold .. "%")
+    end
+
+    -- Force UI update
+    if panel and panel:IsShown() then
+        ACA.UpdatePanel(true)
+    end
+
+    print("ACA: all settings reset to default (ignore list preserved).")
+    return
+end
+
+
+    --------------------------------------------------
     --  /aca anchorreset
     --------------------------------------------------
     if cmd == "anchorreset" then
@@ -969,5 +990,6 @@ SlashCmdList["ALMOSTCOMPLETED"] = SlashCmd
 -- expose
 ACA.UpdatePanel = ACA.UpdatePanel
 ACA.GetCompletionPercent = GetCompletionPercent
+
 
 
