@@ -671,6 +671,7 @@ panel.filterDropdown = filterDropdown
         ACA.UpdatePanel(true)
     end)
 
+    panel.ShowTab = ShowTab
     _G[ACA_PANEL_NAME] = panel
     ShowTab(1)
     return panel
@@ -811,17 +812,21 @@ loader:SetScript("OnEvent", function(self, event, arg1)
         end
         CreateAlmostCompletedPanel()      -- create our frame (starts hidden)
 
-    elseif event == "ADDON_LOADED" and arg1 == "Blizzard_AchievementUI" then
-        -- Blizzard achievement window now exists; hook its OnShow
-        AchievementFrame:HookScript("OnShow", function()
-            local p = _G[ACA_PANEL_NAME]
-            if p then
-                p:Show()
-                PanelTemplates_SetTab(p, 1)
-                ACA.UpdatePanel(false)
-            end
-        end)
-    end
+		elseif event == "ADDON_LOADED" and arg1 == "Blizzard_AchievementUI" then
+		AchievementFrame:HookScript("OnShow", function()
+			local p = _G[ACA_PANEL_NAME]
+			if p then
+				p:Show()
+				if p.ShowTab then
+					p.ShowTab(1)
+				else
+					-- fallback if local function ShowTab is out of scope
+					PanelTemplates_SetTab(p, 1)
+				end
+				ACA.UpdatePanel(false)
+			end
+		end)
+	end
 end)
 
 --------------------------------------------------
@@ -895,7 +900,7 @@ end)
 end
 
 
-    --------------------------------------------------
+     --------------------------------------------------
     --  /aca anchorreset
     --------------------------------------------------
     if cmd == "anchorreset" then
@@ -990,6 +995,4 @@ SlashCmdList["ALMOSTCOMPLETED"] = SlashCmd
 -- expose
 ACA.UpdatePanel = ACA.UpdatePanel
 ACA.GetCompletionPercent = GetCompletionPercent
-
-
 
