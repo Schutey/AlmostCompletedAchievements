@@ -1,13 +1,14 @@
 ## Interface: 110200, 110205
 ## Title: Almost Completed Achievements
 ## Notes: Highlights achievements that are nearly complete.
-## Version: 2.0.1
+## Version: 2.0.2
 ## Author: Schutey & Kagrok
 ## IconTexture: Interface\AddOns\AlmostCompletedAchievements\Media\icon.png
 
 ## SavedVariablesPerCharacter: ACA_ScanThreshold, ACA_Cache, ACA_IgnoreList, ACA_SortMode
 
 AlmostCompletedAchievements.lua
+
 
 
 
