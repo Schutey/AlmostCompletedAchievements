@@ -1,6 +1,7 @@
 --------------------------------------------------------------------------------
 -- AlmostCompletedAchievements
--- v2.0.1 --Midnight prepatch housing prep and bugfixes
+-- v2.0.2
+-- Character progress added to tooltip
 --------------------------------------------------------------------------------
 local ADDON_NAME, ACA = "AlmostCompletedAchievements", {}
 _G[ADDON_NAME] = ACA
@@ -211,26 +212,60 @@ function ACA:PopulateNativeRow(row, ach)
     row.Label:SetText(format("%.0f%%", ach.percent))
 
     -- scripts
-    row:SetScript("OnEnter", function(self)
-        UIParentLoadAddOn("Blizzard_AchievementUI")
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        if GameTooltip.SetAchievementByID then
-            GameTooltip:SetAchievementByID(ach.id)
-        else
-            GameTooltip:ClearLines()
-            GameTooltip:AddLine(ach.name or "[" .. tostring(ach.id) .. "]")
-        end
-        local numC = GetAchievementNumCriteria(ach.id) or 0
-        if numC > 0 then
-            GameTooltip:AddLine(" ")
-            GameTooltip:AddDoubleLine("Your progress:", format("%d / %d (%.0f%%)", floor((ach.percent / 100) * numC + 0.5), numC, ach.percent), 1, 1, 1, 1, 1, 1)
-        end
-        if rewardText and rewardText ~= "" then
-            GameTooltip:AddLine(" ")
-            GameTooltip:AddLine("Reward: " .. rewardText, 1, 1, 1)
-        end
-        GameTooltip:Show()
-    end)
+	row:SetScript("OnEnter", function(self)
+		UIParentLoadAddOn("Blizzard_AchievementUI")
+		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+		GameTooltip:ClearLines()
+
+		local id = ach.id
+		local name, _, _, completed, _, _, _, _, _, icon = GetAchievementInfo(id)
+		GameTooltip:AddLine(name or ("[" .. tostring(id) .. "]"), 1, 0.82, 0) -- goldish title
+
+		if completed then
+			GameTooltip:AddLine("Completed", 0, 1, 0)
+		else
+			GameTooltip:AddLine("Achievement in progress by " .. UnitName("player"), 0.5, 0.8, 1)
+		end
+
+		local numC = GetAchievementNumCriteria(id) or 0
+		if numC > 0 then
+			GameTooltip:AddLine(" ")
+			for i = 1, numC do
+				local critName, _, critCompleted, qty, req = GetAchievementCriteriaInfo(id, i)
+				local color
+				if critCompleted then
+					color = { r = 0, g = 1, b = 0 } -- green
+				else
+					color = { r = 0.6, g = 0.6, b = 0.6 } -- grey
+				end
+				local progressText = ""
+				if req and req > 1 then
+					progressText = format(" (%d/%d)", qty or 0, req)
+				end
+				GameTooltip:AddLine("• " .. (critName or ("Criteria " .. i)) .. progressText, color.r, color.g, color.b)
+			end
+			local done, total = 0, numC
+			for i = 1, numC do
+				local _, _, critCompleted, qty, req = GetAchievementCriteriaInfo(id, i)
+				if critCompleted then
+					done = done + 1
+				elseif qty and req and req > 0 then
+					done = done + (qty / req)
+				end
+			end
+			local percent = (done / total) * 100
+			GameTooltip:AddLine(" ")
+			GameTooltip:AddDoubleLine("Character progress:", format("%d / %d (%.0f%%)", floor(done + 0.5), total, percent), 1, 1, 1, 1, 1, 1)
+		end
+
+		if rewardText and rewardText ~= "" then
+			GameTooltip:AddLine(" ")
+			GameTooltip:AddLine("Reward: " .. rewardText, 1, 1, 1)
+		end
+
+		GameTooltip:Show()
+	end)
+
     row:SetScript("OnLeave", function() GameTooltip:Hide() end)
     row:SetScript("OnClick", function()
         UIParentLoadAddOn("Blizzard_AchievementUI")
@@ -995,5 +1030,4 @@ SlashCmdList["ALMOSTCOMPLETED"] = SlashCmd
 -- expose
 ACA.UpdatePanel = ACA.UpdatePanel
 ACA.GetCompletionPercent = GetCompletionPercent
-
 
