@@ -218,32 +218,53 @@ function ACA:PopulateNativeRow(row, ach)
 		GameTooltip:ClearLines()
 
 		local id = ach.id
-		local name, _, _, completed, _, _, _, _, _, icon = GetAchievementInfo(id)
-		GameTooltip:AddLine(name or ("[" .. tostring(id) .. "]"), 1, 0.82, 0) -- goldish title
+		local a_id, name, points, completed, month, day, year, description, flags, icon, rewardText =
+			GetAchievementInfo(id)
+		if not name and a_id then
+			name, description, points, completed = GetAchievementInfo(id)
+			description = description or description -- keep whatever we got
+		end
+
+		-- Title: Name (ID)
+		local title = (name and tostring(name) ~= "") and name or ("[" .. tostring(id) .. "]")
+		GameTooltip:AddLine(format("%s (%d)", title, id), 1, 0.82, 0) -- goldish title
+
+		GameTooltip:AddLine(" ")
 
 		if completed then
-			GameTooltip:AddLine("Completed", 0, 1, 0)
+			if month and day and year and month > 0 then
+				GameTooltip:AddLine(format("Completed on %02d/%02d/%d", month, day or 0, year or 0), 0, 1, 0)
+			else
+				GameTooltip:AddLine("Completed", 0, 1, 0)
+			end
 		else
 			GameTooltip:AddLine("Achievement in progress by " .. UnitName("player"), 0.5, 0.8, 1)
 		end
 
+		-- Description (word-wrapped). Ensure we use the correct 'description' var.
+		if description and description ~= "" then
+			GameTooltip:AddLine(" ")
+			GameTooltip:AddLine(description, 0.9, 0.9, 0.9, true)
+		end
+
+		-- Criteria list (per-character info)
 		local numC = GetAchievementNumCriteria(id) or 0
 		if numC > 0 then
 			GameTooltip:AddLine(" ")
 			for i = 1, numC do
-				local critName, _, critCompleted, qty, req = GetAchievementCriteriaInfo(id, i)
-				local color
-				if critCompleted then
-					color = { r = 0, g = 1, b = 0 } -- green
-				else
-					color = { r = 0.6, g = 0.6, b = 0.6 } -- grey
-				end
+				local critName, critType, critCompleted, qty, req, charName = GetAchievementCriteriaInfo(id, i)
+				local r, g, b = 0.6, 0.6, 0.6 -- grey default
+				if critCompleted then r, g, b = 0, 1, 0 end -- green when done
+
 				local progressText = ""
 				if req and req > 1 then
 					progressText = format(" (%d/%d)", qty or 0, req)
 				end
-				GameTooltip:AddLine("• " .. (critName or ("Criteria " .. i)) .. progressText, color.r, color.g, color.b)
+
+				GameTooltip:AddLine("• " .. (critName or ("Criteria " .. i)) .. progressText, r, g, b)
 			end
+
+			-- Character progress summary (recalc)
 			local done, total = 0, numC
 			for i = 1, numC do
 				local _, _, critCompleted, qty, req = GetAchievementCriteriaInfo(id, i)
@@ -258,6 +279,7 @@ function ACA:PopulateNativeRow(row, ach)
 			GameTooltip:AddDoubleLine("Character progress:", format("%d / %d (%.0f%%)", floor(done + 0.5), total, percent), 1, 1, 1, 1, 1, 1)
 		end
 
+		-- Reward text if present
 		if rewardText and rewardText ~= "" then
 			GameTooltip:AddLine(" ")
 			GameTooltip:AddLine("Reward: " .. rewardText, 1, 1, 1)
@@ -1030,4 +1052,5 @@ SlashCmdList["ALMOSTCOMPLETED"] = SlashCmd
 -- expose
 ACA.UpdatePanel = ACA.UpdatePanel
 ACA.GetCompletionPercent = GetCompletionPercent
+
 
