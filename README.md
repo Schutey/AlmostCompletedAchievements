@@ -1,4 +1,4 @@
-# Almost Completed Achievements v2.0
+# Almost Completed Achievements v2.0.1
 Completely Rewritten!
 
 ## CORE FUNCTIONALITY
@@ -6,6 +6,7 @@ Completely Rewritten!
  Shows exact progress (criteria done / total) and reward text (mount, title, pet, etc.).
  Click any entry to open the Blizzard Achievement UI directly on that achievement.
  All data is real-time – reflects in-game progress the moment it changes.
+ Tooltips show character progress right from the addon window!
 
 ## Tabbed Interface
 “Almost Completed” – the main list.
@@ -33,8 +34,6 @@ Attach the panel to the left or right side of the Achievement window.
 /aca anchorreset – snap panel back to right side
 
 ## Other
-Attempted migration of previous version blacklist to current version ignore list automatically.
-
 Every setting you tweak and every achievement you ignore is stored per character—what you do on one alt stays on that alt, automatically.
 
 Plus dozens of small changes and QoL improvements with more to come! 
