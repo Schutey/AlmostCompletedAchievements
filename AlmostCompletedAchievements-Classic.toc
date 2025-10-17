@@ -1,4 +1,4 @@
-## Interface: 50501
+## Interface: 50501, 50502
 ## Title: Almost Completed Achievements (Classic)
 ## Notes: Lists near-complete achievements and lets you filter by category.
 ## Version: 2.5
