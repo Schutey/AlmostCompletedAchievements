@@ -1,15 +1,14 @@
-## Interface: 110200, 110205
-## Title: Almost Completed Achievements
-## Notes: Highlights achievements that are nearly complete.
-## Version: 2.0.2
+## Interface: 110205
+## Title: AlmostCompletedAchievements
+## Notes: Lists near-complete achievements and lets you filter by category.
+## Version: 2.5
 ## Author: Schutey & Kagrok
 ## IconTexture: Interface\AddOns\AlmostCompletedAchievements\Media\icon.png
 
-## SavedVariablesPerCharacter: ACA_ScanThreshold, ACA_Cache, ACA_IgnoreList, ACA_SortMode
-
-AlmostCompletedAchievements.lua
+## SavedVariablesPerCharacter: ACA_CatFilterDB, ACA_Cache, ACA_IgnoreList, ACA_ScanThreshold, ACA_FilterMode, ACA_AnchorSide, ACA_ParseSpeed
 
 
-
-
-
+core.lua
+utils.lua
+categories.lua
+options.lua
