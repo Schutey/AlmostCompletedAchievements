@@ -1,39 +1,45 @@
-# Almost Completed Achievements v2.0.1
-Completely Rewritten!
+Almost Completed Achievements v2.5
 
-## CORE FUNCTIONALITY
- Scans your entire achievement database and lists every achievement that is not yet completed but is within X % of being done (default 80 %).
- Shows exact progress (criteria done / total) and reward text (mount, title, pet, etc.).
- Click any entry to open the Blizzard Achievement UI directly on that achievement.
- All data is real-time – reflects in-game progress the moment it changes.
- Tooltips show character progress right from the addon window!
+This is a refactor, not a full 3.0, but it adds an entire category filter system, a smarter scanner, Remix mode, better tooltips, and a bundle of QoL fixes while keeping the addon as fast and lightweight as possible.
 
-## Tabbed Interface
-“Almost Completed” – the main list.
-“Ignored” – manage hidden achievements (un-ignore with one click).
- “Options” – every setting in one place.
+Category filtering
+You can now filter by top-level achievement categories with simple checkboxes:
+Characters, Quests, Exploration, Delves, PvP, Dungeons & Raids, Reputation, Pet Battles, Collections, Expansion Features, and Legion: Remix.
+There’s also a Toggle All control for quick setup.
+Dynamic filters for Professions and World Events
 
-## Reward Filtering
-One-click filters for Mounts, Pets, Titles and more instantly
+Professions: choose All, Learned, or None. “Learned” only shows achievements relevant to the professions your character actually knows.
 
-## Better scanning!
-Counts partial objectives (e.g. 73/100 kills) instead of simple done/not-done  percentage is now accurate even for multi-step achievements.
-Threshold increase to 0-100 
+World Events: choose All, Active, or None. Active automatically shows current holidays and catches upcoming events around the corner so you don’t miss time-sensitive achievements.
 
-## Scan-Speed Presets
-Fast / Smooth / Slow – pick the balance between scan time and FPS comfort.
+Category filtering works with reward filtering. Narrow the list by category and then refine by reward type to zero in on what you care about.
 
-## Movable
-Attach the panel to the left or right side of the Achievement window.
+Remix mode
+Automatic enable for Timerunning characters. If you’re in Legion Remix, the addon detects it and focuses the panel appropriately.
+Manual toggle remains available with /aca remix to enable/disable on any character.
+For flair, the panel title shifts to fel-green while Remix mode is active.
 
-## Full Slash-Command Suite
-/aca default – reset every option to factory
-/aca ignore 1234 – hide achievement ID 1234
-/aca restore 1234 – un-hide it
-/aca scanspeed Fast | Smooth | Slow – change CPU load
-/aca anchorreset – snap panel back to right side
+Tooltips
+Replaced the default Blizzard achievement tooltip with a progress-aware tooltip tailored to the player:
+Shows your current progress at a glance (e.g., X/Y, percent).
+Highlights completed vs remaining criteria so you know what’s left.
+Condenses reward info right in the tooltip so you don’t have to click through.
+Cleaner layout for faster scanning, especially when hovering through a long list.
 
-## Other
-Every setting you tweak and every achievement you ignore is stored per character—what you do on one alt stays on that alt, automatically.
+Reward filtering (expanded)
+Filter the list by reward type:
+All, Any reward, Mount, Pet, Title, Toy, Appearance, Tabard, Illusion, Drake Customization, Warband Campsite, Bronze Cache variants, Infinite Knowledge, Decor, and Other for the oddballs that don’t fit standard labels.
 
-Plus dozens of small changes and QoL improvements with more to come! 
+Smoother, smarter scanning
+Auto scan speed adapts to your threshold:
+90 Fast,
+50–90 Smooth,
+<50 Slow.
+You can still pick Fast/Smooth/Slow manually.
+
+Better logic under the hood to improve performance.
+Quality of life
+Reset button to restore defaults quickly.
+Toggle All for categories as noted above.
+Per-character settings for sane alt behavior.
+Persistence across reloads and relogs.
