@@ -7,5 +7,7 @@
 
 ## SavedVariablesPerCharacter: ACA_CatFilterDB, ACA_Cache, ACA_IgnoreList, ACA_ScanThreshold, ACA_FilterMode, ACA_AnchorSide, ACA_ParseSpeed
 
-
-AlmostCompletedAchievements.lua
+core.lua
+utils.lua
+categories.lua
+options.lua
