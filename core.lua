@@ -45,7 +45,7 @@ ACA.SLIDER_MAX      = 99
 ACA.DEFAULT_THRESHOLD = 80
 ACA.CACHE_TTL       = 60 * 5
 ACA_PANEL_NAME      = "AlmostCompletedPanel"
-ACA.ROW_HEIGHT      = 44
+ACA.ROW_HEIGHT      = 48  -- ACA_BIGGER_TEXT_PATCH
 
 -- speed presets
 
@@ -151,6 +151,8 @@ local function AcquireRow(parent)
     local f = CreateFrame("Button", nil, parent, "BackdropTemplate")
     f:SetSize(360, ACA.ROW_HEIGHT)
 
+    f._isACARow = true
+
     f.bg = f:CreateTexture(nil, "BACKGROUND")
     f.bg:SetAllPoints()
     f.bg:SetColorTexture(0, 0, 0, 0.4)
@@ -175,12 +177,53 @@ local function AcquireRow(parent)
     f.Label:SetJustifyH("LEFT")
     f.Label:SetWidth(220)
 
+    -- ACA_BIGGER_TEXT_PATCH begin
+    do
+        local nfont, nsize = f.Name:GetFont()
+        if nfont and nsize then
+            -- bump the name noticeably
+            f.Name:SetFont(nfont, math.min(26, nsize + 6))
+        end
+        local lfont, lsize = f.Label:GetFont()
+        if lfont and lsize then
+            -- bump the percent a bit less than the name
+            f.Label:SetFont(lfont, math.min(22, lsize + 4))
+        end
+    end
+    -- ACA_BIGGER_TEXT_PATCH end
+
     f._ignoreButton = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
     f._ignoreButton:SetSize(24, 20)
-    f._ignoreButton:SetPoint("RIGHT", f, "RIGHT", -6, -6)
+    -- ACA_ROW_LAYOUT_PATCH begin
+f._ignoreButton:ClearAllPoints()
+f._ignoreButton:SetPoint("TOPRIGHT", f, "TOPRIGHT", -6, -6)
+-- ACA_ROW_LAYOUT_PATCH end
+
+    -- ACA_POINTS_ROW_PATCH begin
+    -- Small points tag to the left of the ignore X
+    f.Points = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    f.Points:ClearAllPoints()
+    f.Points:SetPoint("TOPRIGHT", f._ignoreButton, "TOPLEFT", -6, 0)
+    f.Points:SetJustifyH("RIGHT")
+    f.Points:SetWidth(56)  -- ACA_POINTS_SIZE_PATCH
+    f.Points:SetText("")
+    -- ACA_POINTS_ROW_PATCH end
+
+    -- ACA_POINTS_SIZE_PATCH begin
+    do
+        local pfont, psize = f.Points:GetFont()
+        if pfont and psize then
+            -- Make points a bit more prominent near the X
+            f.Points:SetFont(pfont, math.min(18, psize + 3))
+        end
+    end
+    -- ACA_POINTS_SIZE_PATCH end
 
     f.Reward = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    f.Reward:SetPoint("RIGHT", f._ignoreButton, "LEFT", -8, 0)
+    -- ACA_ROW_LAYOUT_PATCH begin
+f.Reward:ClearAllPoints()
+f.Reward:SetPoint("TOPRIGHT", f._ignoreButton, "BOTTOMRIGHT", 0, -2)
+-- ACA_ROW_LAYOUT_PATCH end
     f.Reward:SetJustifyH("RIGHT")
     f.Reward:SetWidth(160)
     f.Reward:SetWordWrap(false)
@@ -191,7 +234,7 @@ end
 local function ReleaseRow(row)
     if not row then return end
     row:Hide(); row:SetParent(nil)
-    row:SetScript("OnEnter", nil); row:SetScript("OnLeave", nil); row:SetScript("OnClick", nil)
+    row:SetScript("OnEnter", nil); row:SetScript("OnLeave", nil); if row:GetObjectType()=="Button" then row:SetScript("OnClick", nil) end
     if row._ignoreButton then row._ignoreButton:SetScript("OnClick", nil) end
     table.insert(rowPool, row)
 end
@@ -199,7 +242,9 @@ end
 -- wipe helper
 local function WipeChildren(frame)
     for _, child in ipairs({ frame:GetChildren() }) do
-        ReleaseRow(child)
+        if child and child._isACARow then
+            ReleaseRow(child)
+        end
     end
 end
 
@@ -216,6 +261,22 @@ function ACA:PopulateNativeRow(row, ach)
     end
     row.Reward:SetText(Utils and Utils.TruncateString(rewardText, 36) or rewardText:sub(1, 36))
 
+    -- ACA_POINTS_ROW_PATCH begin
+    -- Show "Xpts" to the left of the X button; hide if 0-point FoS/Legacy
+    do
+        local _, _, points = GetAchievementInfo(ach.id)
+        if row.Points then
+            if points and points > 0 then
+                row.Points:SetText(string.format("%dpts", points))
+                row.Points:Show()
+            else
+                row.Points:SetText("")
+                row.Points:Hide()
+            end
+        end
+    end
+    -- ACA_POINTS_ROW_PATCH end
+
     row.Label:SetText(format("%.0f%%", ach.percent))
 
     -- tooltip & click handlers
@@ -229,6 +290,11 @@ function ACA:PopulateNativeRow(row, ach)
         local title = (name and tostring(name) ~= "") and name or ("[" .. tostring(id) .. "]")
         GameTooltip:AddLine(format("%s (%d)", title, id), 1, 0.82, 0)
         GameTooltip:AddLine(" ")
+        -- ACA_POINTS_TOOLTIP_PATCH begin
+        if points and points > 0 then
+            GameTooltip:AddLine(string.format("%dpts", points), 1, 1, 1)
+        end
+        -- ACA_POINTS_TOOLTIP_PATCH end
         if completed then
             if month and day and year and month > 0 then
                 GameTooltip:AddLine(format("Completed on %02d/%02d/%d", month, day or 0, year or 0), 0, 1, 0)
@@ -424,6 +490,14 @@ local function CreateAlmostCompletedPanel()
 
     local tab1 = CreateFrame("Button", panel:GetName() .. "Tab1", panel, "PanelTabButtonTemplate")
     tab1:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 14, -30)
+-- ACA_RESULTS_LABEL_PATCH -- begin
+-- Results counter (only shown after a finished scan on Tab 1)
+local resultsLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+resultsLabel:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -14)
+resultsLabel:SetText("")
+resultsLabel:Hide()
+panel.resultsLabel = resultsLabel
+-- ACA_RESULTS_LABEL_PATCH -- end
     tab1:SetText("Almost Completed")
 
     local tab2 = CreateFrame("Button", panel:GetName() .. "Tab2", panel, "PanelTabButtonTemplate")
@@ -700,6 +774,16 @@ if ACA.CategoryFilters then
             panel.optionsSlider = panel.optionsSlider or panel.optionsSlider
             if panel.optionsSlider then
 				panel.optionsSlider:Hide()
+
+
+-- ACA_RESULTS_LABEL_PATCH -- begin
+-- Hide the results label on other tabs; it only shows on Tab 1 after scanning completes
+if panel and panel.resultsLabel then
+    if idx ~= 1 then
+        panel.resultsLabel:Hide()
+    end
+end
+-- ACA_RESULTS_LABEL_PATCH -- end
 			end
             panel.filterDropdown:Show()
             if panel.filterLabel then panel.filterLabel:Show() end
@@ -867,7 +951,7 @@ local completedChild, ignoredChild = panel.childCompleted, panel.childIgnored
     -- Completed tab
     local needFreshScan = forceRescan
                      or not ACA.scanResultsForThr
-                     or #ACA.scanResults == 0
+                     or (ACA.scanResultsForThr ~= (ACA_ScanThreshold or ACA.DEFAULT_THRESHOLD))
 
     local function display(results)
         WipeChildren(completedChild)
@@ -880,6 +964,24 @@ local completedChild, ignoredChild = panel.childCompleted, panel.childIgnored
             end
         end
         sort(filtered, function(a, b) return a.percent > b.percent end)
+        local parentFrame = ACA.UI and (ACA.UI.ResultsFrame or ACA.UI.ScrollChild or ACA.UI.ScrollFrame) or completedChild
+        if #filtered == 0 then
+            if parentFrame and ACA.ShowEmptyResultsMessage then ACA.ShowEmptyResultsMessage(parentFrame) end
+            completedChild:SetHeight(200)
+-- Finished with 0 results; update counter if on Tab 1
+do
+    local p = _G[ACA_PANEL_NAME]
+    if p and p.resultsLabel and PanelTemplates_GetSelectedTab and PanelTemplates_GetSelectedTab(p) == 1 then
+        p.resultsLabel:SetText("Results: 0")
+        p.resultsLabel:Show()
+    end
+end
+
+            return
+        else
+            if parentFrame and ACA.HideEmptyResultsMessage then ACA.HideEmptyResultsMessage(parentFrame) end
+        end
+
 
         for i, ach in ipairs(filtered) do
             local row = AcquireRow(completedChild)
@@ -893,6 +995,14 @@ local completedChild, ignoredChild = panel.childCompleted, panel.childIgnored
             p.scanBar:SetMinMaxValues(0, 1)
             p.scanBar:SetValue(0)
             p.scanBar.Text:SetText("Idle")
+
+-- ACA_RESULTS_LABEL_PATCH -- begin
+-- Scan finished; reflect final count on Tab 1
+if p and p.resultsLabel and PanelTemplates_GetSelectedTab and PanelTemplates_GetSelectedTab(p) == 1 then
+    p.resultsLabel:SetText(("Results: %d"):format(#filtered))
+    p.resultsLabel:Show()
+end
+-- ACA_RESULTS_LABEL_PATCH -- end
         end
     end
 
@@ -905,7 +1015,11 @@ local completedChild, ignoredChild = panel.childCompleted, panel.childIgnored
                     p.scanBar:SetValue(scanned)
                     local pct = (scanned / total) * 100
                     p.scanBar.Text:SetText(format("Scanning... %d/%d (%.0f%%)", scanned, total, pct))
-                else
+                
+            -- ACA_RESULTS_LABEL_PATCH -- begin
+            if p and p.resultsLabel then p.resultsLabel:Hide() end
+            -- ACA_RESULTS_LABEL_PATCH -- end
+            else
                     p.scanBar:SetMinMaxValues(0, 1)
                     p.scanBar:SetValue(0)
                     p.scanBar.Text:SetText("Scanning... 0/0")
@@ -913,7 +1027,22 @@ local completedChild, ignoredChild = panel.childCompleted, panel.childIgnored
             end
         end)
     else
-        display(ACA.scanResults)
+        if #ACA.scanResults == 0 then
+    local pf = ACA.UI and (ACA.UI.ResultsFrame or ACA.UI.ScrollChild or ACA.UI.ScrollFrame) or completedChild
+    if pf and ACA.ShowEmptyResultsMessage then ACA.ShowEmptyResultsMessage(pf) end
+    completedChild:SetHeight(200)
+-- No rescan needed and still 0; show counter if on Tab 1
+do
+    local p = _G[ACA_PANEL_NAME]
+    if p and p.resultsLabel and PanelTemplates_GetSelectedTab and PanelTemplates_GetSelectedTab(p) == 1 then
+        p.resultsLabel:SetText("Results: 0")
+        p.resultsLabel:Show()
+    end
+end
+
+    return
+end
+display(ACA.scanResults)
     end
 end
 
@@ -1171,3 +1300,32 @@ do
         end)
     end)
 end
+
+-- BEGIN PATCH (core.lua)
+-- reason: Empty-state overlay helpers to avoid rescan loops when zero results
+do
+    local EMPTY_MSG = "Your current ACA settings returned 0 results.|nLoosen your filters or lower the threshold, then click Rescan."
+    function ACA.ShowEmptyResultsMessage(parent)
+        if not parent or (parent.IsForbidden and parent:IsForbidden()) then return end
+        if not parent.ACAEmptyState then
+            local f = CreateFrame("Frame", nil, parent)
+            f:SetAllPoints(parent)
+            f:Hide()
+            -- no background; just text in the results area
+            local t = f:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+            t:SetPoint("TOP", 0, -40)
+            t:SetJustifyH("CENTER")
+            t:SetJustifyV("TOP")
+            t:SetWordWrap(true)
+            t:SetText(EMPTY_MSG)
+            f.Text = t
+            parent.ACAEmptyState = f
+        end
+        parent.ACAEmptyState.Text:SetText(EMPTY_MSG)
+        parent.ACAEmptyState:Show()
+    end
+    function ACA.HideEmptyResultsMessage(parent)
+        if parent and parent.ACAEmptyState then parent.ACAEmptyState:Hide() end
+    end
+end
+-- END PATCH
