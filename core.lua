@@ -178,17 +178,14 @@ local function AcquireRow(parent)
     f.Label:SetWidth(220)
 
     -- ACA_BIGGER_TEXT_PATCH begin
+    -- Nudge the title about 10% larger for better visual balance. Percent/label unchanged.
     do
         local nfont, nsize = f.Name:GetFont()
         if nfont and nsize then
-            -- bump the name noticeably
-            f.Name:SetFont(nfont, math.min(26, nsize + 6))
+            local target = math.floor((nsize * 1.10) + 0.5)
+            f.Name:SetFont(nfont, math.max(8, target))
         end
-        local lfont, lsize = f.Label:GetFont()
-        if lfont and lsize then
-            -- bump the percent a bit less than the name
-            f.Label:SetFont(lfont, math.min(22, lsize + 4))
-        end
+        -- Leave percent/label as-is.
     end
     -- ACA_BIGGER_TEXT_PATCH end
 
