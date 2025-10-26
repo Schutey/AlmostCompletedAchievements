@@ -1,4 +1,4 @@
-Almost Completed Achievements v2.5
+Almost Completed Achievements v2.7
 
 This is a refactor, not a full 3.0, but it adds an entire category filter system, a smarter scanner, Remix mode, better tooltips, and a bundle of QoL fixes while keeping the addon as fast and lightweight as possible.
 
@@ -7,6 +7,8 @@ You can now filter by top-level achievement categories with simple checkboxes:
 Characters, Quests, Exploration, Delves, PvP, Dungeons & Raids, Reputation, Pet Battles, Collections, Expansion Features, and Legion: Remix.
 There’s also a Toggle All control for quick setup.
 Dynamic filters for Professions and World Events
+
+Expansion filtering added for all expansion including midnight.
 
 Professions: choose All, Learned, or None. “Learned” only shows achievements relevant to the professions your character actually knows.
 
@@ -29,6 +31,10 @@ Cleaner layout for faster scanning, especially when hovering through a long list
 Reward filtering (expanded)
 Filter the list by reward type:
 All, Any reward, Mount, Pet, Title, Toy, Appearance, Tabard, Illusion, Drake Customization, Warband Campsite, Bronze Cache variants, Infinite Knowledge, Decor, and Other for the oddballs that don’t fit standard labels.
+
+Sorting options added
+
+Pop-out tracker added showing top 5 achievements in the main achievements panel
 
 Smoother, smarter scanning
 Auto scan speed adapts to your threshold:
