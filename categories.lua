@@ -13,9 +13,26 @@ ACA_CatFilterDB = ACA_CatFilterDB or {
     ["WorldEventsMode"] = "Active",    -- All / Active / None
 }
 
+
+-- per-character expansion filter DB: keys are expansion names, values boolean (selected)
+ACA_ExpFilterDB = ACA_ExpFilterDB or {
+    ["Classic"] = false,
+    ["The Burning Crusade"] = false,
+    ["Wrath of the Lich King"] = false,
+    ["Cataclysm"] = false,
+    ["Mists of Pandaria"] = false,
+    ["Warlords of Draenor"] = false,
+    ["Legion"] = false,
+    ["Battle for Azeroth"] = false,
+    ["Shadowlands"] = false,
+    ["Dragonflight"] = false,
+    ["The War Within"] = false,
+    ["Midnight"] = false,
+}
 CF.topParent = {}    -- categoryID -> top-level name
 CF.achParent = {}    -- achievementID -> top-level name
 CF.achCatName = {}  -- achievementID -> subcategory name (e.g., specific holiday)
+CF.achExpansion = {} -- achievementID -> expansion name
 CF.fullList  = {}    -- master scan list (unfiltered)
 CF.hiddenIDs = {}    -- set of filtered out achIDs
 CF.mapsBuilt = false
@@ -35,6 +52,20 @@ do
 
         local cats = (ACA.SafeGetCategoryList and ACA.SafeGetCategoryList()) or (GetCategoryList() or {})
         for _, catID in ipairs(cats) do
+            local EXP_MATCH = {
+                ["Classic"] = { "Classic" },
+                ["The Burning Crusade"] = { "Burning Crusade" },
+                ["Wrath of the Lich King"] = { "Wrath", "Wrath of the Lich King" },
+                ["Cataclysm"] = { "Cataclysm" },
+                ["Mists of Pandaria"] = { "Mists", "Pandaria" },
+                ["Warlords of Draenor"] = { "Warlords", "Draenor" },
+                ["Legion"] = { "Legion" },
+                ["Battle for Azeroth"] = { "Battle for Azeroth", "BFA", "Azeroth" },
+                ["Shadowlands"] = { "Shadowlands" },
+                ["Dragonflight"] = { "Dragonflight" },
+                ["The War Within"] = { "The War Within", "War Within" },
+                ["Midnight"] = { "Midnight" },
+            }
             local name, parent = GetCategoryInfo(catID)
             local topName = name
             while parent and parent > 0 do
@@ -44,10 +75,20 @@ do
                 parent = p
             end
             CF.topParent[catID] = topName
+            local function detectExpansion()
+                local hay = ((name or "") .. " " .. (topName or "")):lower()
+                for exp, keys in pairs(EXP_MATCH) do
+                    for _, k in ipairs(keys) do
+                        if hay:find(k:lower(), 1, true) then return exp end
+                    end
+                end
+                return nil
+            end
+            local catExpansion = detectExpansion()
             local num = GetCategoryNumAchievements(catID) or 0
             for i = 1, num do
                 local achID = select(1, GetAchievementInfo(catID, i))
-                if achID then CF.achParent[achID] = topName; CF.achCatName[achID] = name end
+                if achID then CF.achParent[achID] = topName; CF.achCatName[achID] = name; if catExpansion then CF.achExpansion[achID] = catExpansion end end
             end
         end
     end
@@ -55,10 +96,8 @@ end
 
 -- helpers: professions and holidays
 local function PlayerKnowsProfInAchieve(achID)
-    -- Build a set of known profession names
     local known = {}
 
-    -- Prefer stable API available immediately
     if GetProfessions and GetProfessionInfo then
         local a, b, c, d, e = GetProfessions()
         for _, idx in ipairs({a, b, c, d, e}) do
@@ -69,23 +108,19 @@ local function PlayerKnowsProfInAchieve(achID)
         end
     end
 
-    -- Fallback: TradeSkill API (may not be ready right at login)
     if next(known) == nil and C_TradeSkillUI and C_TradeSkillUI.GetAllProfessionInfo then
         local profs = C_TradeSkillUI.GetAllProfessionInfo()
         if profs then
             for _, p in ipairs(profs) do
-                if p and p.name then known[p.name] = true
-                end
+                if p and p.name then known[p.name] = true end
             end
         end
     end
 
-    -- If still unknown, don't pretend everything matches
     if next(known) == nil then
         return false
     end
 
-    -- Match any known profession name against criteria text
     local num = GetAchievementNumCriteria(achID) or 0
     for i = 1, num do
         local text = select(1, GetAchievementCriteriaInfo(achID, i))
@@ -102,11 +137,8 @@ end
 
 local function AnyHolidayActive()
     if not C_Calendar or not C_DateAndTime then
-        -- If the calendar doesn’t exist for some reason, don’t claim there’s a holiday.
         return false
     end
-
-    -- Initialize calendar data if necessary (pcall to avoid taint issues)
     if C_Calendar.OpenCalendar then pcall(C_Calendar.OpenCalendar) end
 
     local function dayHasHoliday(offset)
@@ -123,26 +155,19 @@ local function AnyHolidayActive()
         return false
     end
 
-    -- Today, and around reset boundaries
     return dayHasHoliday(0) or dayHasHoliday(-1) or dayHasHoliday(1)
 end
 
--- Check whether the specific holiday for this achievement is active.
--- Uses the achievement's subcategory name under "World Events" (e.g., "Hallow's End", "Brewfest").
 local function HolidayActiveForAchievement(achID)
     if not C_Calendar or not C_DateAndTime then return false end
-    -- Initialize calendar data if needed
     if C_Calendar.OpenCalendar then pcall(C_Calendar.OpenCalendar) end
 
     local sub = CF.achCatName and CF.achCatName[achID]
     if not sub or sub == "" then
-        -- Fallback: if we cannot resolve a subcategory name, fall back to "any holiday active"
         return AnyHolidayActive()
     end
 
-    -- Normalize for simple contains matching
     local needle = tostring(sub):lower()
-
     local now = C_DateAndTime.GetCurrentCalendarTime()
     if not now or not now.monthDay then return false end
 
@@ -159,17 +184,13 @@ local function HolidayActiveForAchievement(achID)
         return false
     end
 
-    -- Check a small window around today to cover reset boundaries
     for d = -1, 1 do
         if dayHasHolidayName(d) then return true end
     end
     return false
 end
 
-
--- whether an achievement should be displayed
 function CF.ShouldShow(achID)
-    -- if we don't know parent, be permissive
     local top = CF.achParent[achID]
     if top == "Feats of Strength" or top == "Legacy" then return false end
     if not top then return true end
@@ -190,10 +211,25 @@ function CF.ShouldShow(achID)
         if mode == "Active" then return HolidayActiveForAchievement(achID) end
     end
 
+    -- Expansion filter check
+    do
+        local db = _G.ACA_ExpFilterDB or {}
+        local total, checked = 0, 0
+        for _, _ in pairs({
+            ["Classic"]=true, ["The Burning Crusade"]=true, ["Wrath of the Lich King"]=true, ["Cataclysm"]=true,
+            ["Mists of Pandaria"]=true, ["Warlords of Draenor"]=true, ["Legion"]=true, ["Battle for Azeroth"]=true,
+            ["Shadowlands"]=true, ["Dragonflight"]=true, ["The War Within"]=true, ["Midnight"]=true,
+        }) do total = total + 1 end
+        for k, v in pairs(db) do if v then checked = checked + 1 end end
+        local active = (checked > 0) and (checked < total)
+        if active then
+            local exp = CF.achExpansion[achID]
+            if not exp or not db[exp] then return false end
+        end
+    end
     return true
 end
 
--- build the filtered view (populates ACA.scanResults and CF.hiddenIDs)
 function CF.RefreshFilteredList()
     if #CF.fullList == 0 then return end
     wipe(CF.hiddenIDs)
@@ -207,12 +243,11 @@ function CF.RefreshFilteredList()
         end
     end
     if CF._pendingUpdate then CF._pendingUpdate:Cancel() end
-	CF._pendingUpdate = C_Timer.NewTimer(0.5, function()
-		ACA.UpdatePanel(false)
-	end)
+    CF._pendingUpdate = C_Timer.NewTimer(0.5, function()
+        ACA.UpdatePanel(false)
+    end)
 end
 
--- wrap the main scan to store master copy (fullList)
 function CF.HookScan()
     if ACA._scanWrapped then return end
     local orig = ACA.ScanAchievements
@@ -230,13 +265,11 @@ function CF.HookScan()
     ACA._scanWrapped = true
 end
 
--- UI injection functions (checkboxes)
 function CF.InjectUI(parent)
     if not parent or parent.catFilterBox then return end
 
     local box = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-    box:SetSize(360, 200)
-    box:SetPoint("TOP", parent, "TOP", 0, -150)
+    box:SetHeight(300)
     box:SetBackdrop({
         bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
         edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
@@ -247,11 +280,15 @@ function CF.InjectUI(parent)
     box:SetBackdropBorderColor(0.4, 0.4, 0.4)
     parent.catFilterBox = box
 
+    -- Position: mirror list width, now tucked just under the top dropdowns.
+    box:ClearAllPoints()
+    box:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -40)
+    box:SetPoint("TOPRIGHT", parent, "TOPRIGHT", 0, -40)
+
     local title = box:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     title:SetPoint("TOPLEFT", box, "TOPLEFT", 10, -8)
     title:SetText("Achievement Categories")
 
-    -- BEGIN: Toggle All button (tiny, polite, does not touch Professions/World Events)
     local toggleAllBtn = CreateFrame("Button", nil, box, "UIPanelButtonTemplate")
     toggleAllBtn:SetSize(80, 20)
     toggleAllBtn:SetPoint("LEFT", title, "RIGHT", 8, 0)
@@ -268,7 +305,6 @@ function CF.InjectUI(parent)
         _G.ACA_CatFilterDB = _G.ACA_CatFilterDB or {}
         local db = _G.ACA_CatFilterDB
 
-        -- if any boolean is false, we turn everything on; else turn all off
         local allOn = true
         for k, v in pairs(db) do
             if type(v) == "boolean" and v == false then
@@ -287,20 +323,19 @@ function CF.InjectUI(parent)
         if ACA and ACA.SyncOptionsUI then ACA.SyncOptionsUI() end
         if CF and CF.RefreshFilteredList then CF.RefreshFilteredList() end
     end)
-    -- END: Toggle All button
 
-    local function AddCheck(parent, text, key, x, y, tooltip)
+    -- 4-column layout with cozier spacing
+    local function AddCheck(parent, text, key, x, y, tooltip, textWidth)
         local cb = CreateFrame("CheckButton", nil, parent, "ChatConfigCheckButtonTemplate")
         cb:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
         cb.Text:SetText(text)
-		
-        -- Fit across UI scales: smaller font + wrapping
+
         if cb.Text and cb.Text.SetFontObject then cb.Text:SetFontObject(GameFontNormalSmall) end
         if cb.Text and cb.Text.SetWordWrap then cb.Text:SetWordWrap(true) end
-        if cb.Text and cb.Text.SetWidth then cb.Text:SetWidth(110) end
+        if cb.Text and cb.Text.SetWidth then cb.Text:SetWidth(textWidth or 90) end  -- tighter label width
         if cb.SetHitRectInsets then cb:SetHitRectInsets(0, -10, 0, 0) end
-cb:SetSize(24, 24)            
-		cb:SetHitRectInsets(0, 0, 0, 0)  
+        cb:SetSize(24, 24)
+        cb:SetHitRectInsets(0, 0, 0, 0)
         cb:SetChecked(ACA_CatFilterDB[key] ~= false)
         cb:SetScript("OnClick", function(self)
             ACA_CatFilterDB[key] = self:GetChecked()
@@ -321,23 +356,128 @@ cb:SetSize(24, 24)
     local cats = {
         "Characters", "Quests", "Exploration", "Delves",
         "Player vs. Player", "Dungeons & Raids", "Reputation",
-        "Pet Battles", "Collections", "Expansion Features","Legion: Remix",
+        "Pet Battles", "Collections", "Expansion Features", "Legion: Remix",
     }
-    local perRow, colPitch, x0, y0 = 3, 350 / 3, 10, -25
+
+    -- Determine column pitch based on current width; fallback to sensible defaults.
+    local perRow = 4
+    local boxW = box:GetWidth() or parent:GetWidth() or 396
+    local innerW = math.max(200, boxW - 20)              -- account for padding
+    local colPitch = innerW / perRow
+    local x0, y0 = 10, -25
+    local rowPitch = 24                                  -- tighten vertical spacing a bit
+
     for i, cat in ipairs(cats) do
-        local row = floor((i - 1) / perRow)
+        local row = math.floor((i - 1) / perRow)
         local col = (i - 1) % perRow
         local label = cat == "Player vs. Player" and "PvP" or cat
-        AddCheck(box, label, cat, x0 + col * colPitch, y0 - row * 28, "Hide all achievements in this category.")
+        local x = x0 + col * colPitch
+        local y = y0 - row * rowPitch
+        AddCheck(box, label, cat, x, y, "Hide all achievements in this category.", math.floor(colPitch - 30))
     end
+
+
+    -- Expansions header and toggle-all
+    local expTitle = box:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    local catRows = math.ceil(#cats / perRow)
+    expTitle:SetPoint("TOPLEFT", box, "TOPLEFT", 10, y0 - catRows * rowPitch - 4)
+    expTitle:SetText("Expansions")
+
+    local expToggleAll = CreateFrame("Button", nil, box, "UIPanelButtonTemplate")
+    expToggleAll:SetSize(80, 20)
+    expToggleAll:SetPoint("LEFT", expTitle, "RIGHT", 8, 0)
+    expToggleAll:SetText("Toggle All")
+    expToggleAll.tooltipText = "Toggle all expansion filters on/off. If all are on or all are off, expansion filtering is disabled."
+
+    expToggleAll:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText(self.tooltipText, nil, nil, nil, nil, true)
+        GameTooltip:Show()
+    end)
+    expToggleAll:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    local EXPANSIONS = {
+        "Classic","The Burning Crusade","Wrath of the Lich King","Cataclysm",
+        "Mists of Pandaria","Warlords of Draenor","Legion","Battle for Azeroth",
+        "Shadowlands","Dragonflight","The War Within","Midnight",
+    }
+
+    box.expansionCBs = box.expansionCBs or {}
+
+    local expPerRow = 4
+    local expColPitch = innerW / expPerRow
+    local expX0 = 10
+    local expY0 = y0 - catRows * rowPitch - 24
+    local expRowPitch = 22
+
+    local function AddExpCheck(parent, label, x, y, textWidth)
+        local cb = CreateFrame("CheckButton", nil, parent, "ChatConfigCheckButtonTemplate")
+        cb:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
+        cb.Text:SetText(label)
+        if cb.Text and cb.Text.SetFontObject then cb.Text:SetFontObject(GameFontNormalSmall) end
+        if cb.Text and cb.Text.SetWordWrap then cb.Text:SetWordWrap(true) end
+        if cb.Text and cb.Text.SetWidth then cb.Text:SetWidth(textWidth or 120) end
+        cb:SetSize(24, 24)
+        cb:SetHitRectInsets(0, 0, 0, 0)
+        cb:SetChecked(ACA_ExpFilterDB[label] or false)
+        cb:SetScript("OnClick", function(self)
+            ACA_ExpFilterDB[label] = self:GetChecked() and true or false
+            CF.RefreshFilteredList()
+        end)
+        table.insert(box.expansionCBs, cb)
+        return cb
+    end
+
+    for i, expName in ipairs(EXPANSIONS) do
+        local row = math.floor((i - 1) / expPerRow)
+        local col = (i - 1) % expPerRow
+        local x = expX0 + col * expColPitch
+        local y = expY0 - row * expRowPitch
+        AddExpCheck(box, expName, x, y, math.floor(expColPitch - 30))
+    end
+
+    -- toggle-all behavior
+    expToggleAll:SetScript("OnClick", function()
+        local anyOff, anyOn = false, false
+        for _, expName in ipairs(EXPANSIONS) do
+            if ACA_ExpFilterDB[expName] then anyOn = true else anyOff = true end
+        end
+        local target = anyOff and true or false
+        for _, expName in ipairs(EXPANSIONS) do
+            ACA_ExpFilterDB[expName] = target
+        end
+        -- sync checkboxes
+        if box.expansionCBs then
+            for _, cb in ipairs(box.expansionCBs) do
+                local label = cb.Text and cb.Text:GetText()
+                if label then cb:SetChecked(ACA_ExpFilterDB[label] or false) end
+            end
+        end
+        CF.RefreshFilteredList()
+    end)
+
+    -- Helper for external sync
+    function CF.SyncExpUI()
+        if not box or not box.expansionCBs then return end
+        for _, cb in ipairs(box.expansionCBs) do
+            local label = cb.Text and cb.Text:GetText()
+            if label then cb:SetChecked(ACA_ExpFilterDB[label] or false) end
+        end
+    end
+    -- After laying out the categories, move Professions and World Events up
+    local rows = catRows
+    local gap = 8                                         -- small spacer below categories grid
+    local expRows = math.ceil(#EXPANSIONS / expPerRow)
+    local profBaselineY = expY0 - expRows * expRowPitch - gap
+    local weBaselineY   = profBaselineY - rowPitch        -- keep same vertical rhythm
 
     -- Professions row
     local profText = box:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    profText:SetPoint("TOPLEFT", box, "TOPLEFT", 10, -145)
+    profText:SetPoint("TOPLEFT", box, "TOPLEFT", 10, profBaselineY)
     profText:SetText("Professions:")
-    local profAll = AddCheck(box, "All", "ProfessionsModeAll", 90, -145)
-    local profNone = AddCheck(box, "None", "ProfessionsModeNone", 150, -145, "Hide all profession achievements.")
-    local profLearn = AddCheck(box, "Learned", "ProfessionsModeLearned", 225, -145, "Only show achievements for your learned professions.")
+    local profAll = AddCheck(box, "All", "ProfessionsModeAll", 90, profBaselineY, nil, 40)
+    local profNone = AddCheck(box, "None", "ProfessionsModeNone", 150, profBaselineY, "Hide all profession achievements.", 50)
+    local profLearn = AddCheck(box, "Learned", "ProfessionsModeLearned", 225, profBaselineY, "Only show achievements for your learned professions.", 70)
 
     local function SyncProf()
         local mode = ACA_CatFilterDB["ProfessionsMode"]
@@ -358,11 +498,11 @@ cb:SetSize(24, 24)
 
     -- World-Events row
     local weText = box:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    weText:SetPoint("TOPLEFT", box, "TOPLEFT", 10, -170)
+    weText:SetPoint("TOPLEFT", box, "TOPLEFT", 10, weBaselineY)
     weText:SetText("World Events:")
-    local weAll = AddCheck(box, "All", "WorldEventsModeAll", 90, -170)
-    local weNone = AddCheck(box, "None", "WorldEventsModeNone", 150, -170, "Hide all world-event achievements.")
-    local weActive = AddCheck(box, "Active", "WorldEventsModeActive", 225, -170, "Only show achievements for currently active holidays.")
+    local weAll = AddCheck(box, "All", "WorldEventsModeAll", 90, weBaselineY, nil, 40)
+    local weNone = AddCheck(box, "None", "WorldEventsModeNone", 150, weBaselineY, "Hide all world-event achievements.", 50)
+    local weActive = AddCheck(box, "Active", "WorldEventsModeActive", 225, weBaselineY, "Only show achievements for currently active holidays.", 60)
     local function SyncWE()
         local mode = ACA_CatFilterDB["WorldEventsMode"]
         weAll:SetChecked(mode == "All")
@@ -381,7 +521,6 @@ cb:SetSize(24, 24)
     SyncWE()
 end
 
--- delayed initializer to hook scanning and inject UI
 local loader = CreateFrame("Frame")
 loader:RegisterEvent("ADDON_LOADED")
 loader:SetScript("OnEvent", function(_, _, name)
@@ -391,7 +530,6 @@ loader:SetScript("OnEvent", function(_, _, name)
             CF.HookScan()
             local panel = _G[ACA_PANEL_NAME]
             if panel and panel.contentOptions then CF.InjectUI(panel.contentOptions) end
-            -- copy first scan into master list if present
             if ACA.scanResults and #ACA.scanResults > 0 and #CF.fullList == 0 then
                 for i = 1, #ACA.scanResults do CF.fullList[i] = ACA.scanResults[i] end
             end
@@ -401,7 +539,6 @@ loader:SetScript("OnEvent", function(_, _, name)
     end
 end)
 
--- ensure UpdatePanel incremental updates respect CF.hiddenIDs (hook), wait until UpdatePanel exists
 local refreshPending
 local function CF_TryHookUpdatePanel()
     if CF._hookedUpdatePanel then return end
@@ -421,6 +558,5 @@ local function CF_TryHookUpdatePanel()
     end
 end
 CF_TryHookUpdatePanel()
-
 
 return CF
