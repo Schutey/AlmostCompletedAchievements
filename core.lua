@@ -11,7 +11,12 @@ ACA_IgnoreList       = ACA_IgnoreList or {}
 ACA_FilterMode       = ACA_FilterMode or "All"
 ACA_AnchorSide       = ACA_AnchorSide or "RIGHT"
 ACA_ParseSpeed       = ACA_ParseSpeed or "Auto"
+ACA_SortMode         = ACA_SortMode or "Percent Desc."  -- NEW: default sort
 ACA._deferUntilReady = true
+
+ACA_Top5DB         = ACA_Top5DB or { shown = false, locked = false, clickThrough = false, point = nil }
+
+
 
 -- Reanchor helper: RIGHT or LEFT
 function ACA.Reanchor(side)
@@ -21,9 +26,13 @@ function ACA.Reanchor(side)
         panel:ClearAllPoints()
         if ACA_AnchorSide == "LEFT" then
             panel:SetPoint("TOPRIGHT", AchievementFrame, "TOPLEFT", -10, 0)
+            panel._acaBaseX = -10
         else
             panel:SetPoint("TOPLEFT", AchievementFrame, "TOPRIGHT", 10, 0)
+            panel._acaBaseX = 10
         end
+        if ACA.UpdateHideButtonAnchors then ACA.UpdateHideButtonAnchors() end
+        if ACA._ApplyPanelStrata then ACA._ApplyPanelStrata(panel._acaHidden) end
     end
     if _G["ACAAnchorDrop"] then UIDropDownMenu_SetText(_G["ACAAnchorDrop"], ACA_AnchorSide) end
 end
@@ -200,7 +209,7 @@ f._ignoreButton:SetPoint("TOPRIGHT", f, "TOPRIGHT", -6, -6)
     -- Small points tag to the left of the ignore X
     f.Points = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     f.Points:ClearAllPoints()
-    f.Points:SetPoint("TOPRIGHT", f._ignoreButton, "TOPLEFT", -6, 0)
+    f.Points:SetPoint("RIGHT", f._ignoreButton, "LEFT", -6, 0)
     f.Points:SetJustifyH("RIGHT")
     f.Points:SetWidth(56)  -- ACA_POINTS_SIZE_PATCH
     f.Points:SetText("")
@@ -211,7 +220,7 @@ f._ignoreButton:SetPoint("TOPRIGHT", f, "TOPRIGHT", -6, -6)
         local pfont, psize = f.Points:GetFont()
         if pfont and psize then
             -- Make points a bit more prominent near the X
-            f.Points:SetFont(pfont, math.min(18, psize + 3))
+            f.Points:SetFont(pfont, math.min(18, psize + 4))
         end
     end
     -- ACA_POINTS_SIZE_PATCH end
@@ -247,6 +256,7 @@ end
 
 -- populate a row
 function ACA:PopulateNativeRow(row, ach)
+    row.Icon.SetTexture = row.Icon.SetTexture or row.Icon.SetTexture  -- guard
     row.Icon:SetTexture(ach.icon or 134400)
     row.Name:SetText(ach.name or ("[" .. tostring(ach.id) .. "]"))
 
@@ -256,15 +266,16 @@ function ACA:PopulateNativeRow(row, ach)
         local all = { GetAchievementInfo(ach.id) }
         rewardText = all[11] or all[12] or all[13] or ""
     end
-    row.Reward:SetText(Utils and Utils.TruncateString(rewardText, 36) or rewardText:sub(1, 36))
+    row.Reward:SetText(Utils and Utils.TruncateString and Utils.TruncateString(rewardText, 36) or (rewardText and rewardText.sub and rewardText:sub(1, 36) or ""))
 
-    -- ACA_POINTS_ROW_PATCH begin
-    -- Show "Xpts" to the left of the X button; hide if 0-point FoS/Legacy
+    
+-- ACA_POINTS_ROW_PATCH begin
+    -- Show percent to the left of the X button; keep original small-tag behavior (hide when zero)
     do
-        local _, _, points = GetAchievementInfo(ach.id)
+        local pct = (ach.percent or 0)
         if row.Points then
-            if points and points > 0 then
-                row.Points:SetText(string.format("%dpts", points))
+            if pct > 0 then
+                row.Points:SetText(string.format("%.0f%%", pct))
                 row.Points:Show()
             else
                 row.Points:SetText("")
@@ -274,7 +285,8 @@ function ACA:PopulateNativeRow(row, ach)
     end
     -- ACA_POINTS_ROW_PATCH end
 
-    row.Label:SetText(format("%.0f%%", ach.percent))
+
+    do local _, _, pts = GetAchievementInfo(ach.id); row.Label:SetText(pts and string.format("%dpts", pts) or "") end
 
     -- tooltip & click handlers
     row:SetScript("OnEnter", function(self)
@@ -423,7 +435,7 @@ function ACA.ScanAchievements(onComplete, onProgress)
                 if currentAch <= numAch then
                     local achID = select(1, GetAchievementInfo(catID, currentAch))
                     if achID and not ACA_IgnoreList[tonumber(achID)] then
-                        local _, name, _, completed, _, _, _, _, _, icon = GetAchievementInfo(achID)
+                        local _, name, points, completed, _, _, _, _, _, icon = GetAchievementInfo(achID)
                         if not completed then
                             local percent = GetCompletionPercent(achID)
                             if percent >= threshold then
@@ -433,8 +445,13 @@ function ACA.ScanAchievements(onComplete, onProgress)
                                     rewardText = all[11] or all[12] or all[13] or ""
                                 end
                                 table.insert(results, {
-                                    id = achID, name = name or "[" .. tostring(achID) .. "]",
-                                    percent = percent, category = catID, icon = icon, reward = rewardText
+                                    id = achID,
+                                    name = name or ("[" .. tostring(achID) .. "]"),
+                                    percent = percent,
+                                    category = catID,
+                                    icon = icon,
+                                    reward = rewardText,
+                                    points = points or 0,   -- NEW: store points for sorting
                                 })
                             end
                         end
@@ -458,6 +475,56 @@ function ACA.ScanAchievements(onComplete, onProgress)
     end)
 end
 
+-- Sort logic
+ACA.SORT_LIST = {
+    "Percent Desc.",
+    "Percent Asc.",
+    "Name Asc.",
+    "Name Desc.",
+    "Points Desc.",
+    "Points Asc.",
+}
+
+local function _getComparator(mode)
+    if mode == "Percent Asc." then
+        return function(a, b)
+            if a.percent == b.percent then
+                return (a.name or ""):lower() < (b.name or ""):lower()
+            end
+            return a.percent < b.percent
+        end
+    elseif mode == "Name Asc." then
+        return function(a, b)
+            return (a.name or ""):lower() < (b.name or ""):lower()
+        end
+    elseif mode == "Name Desc." then
+        return function(a, b)
+            return (a.name or ""):lower() > (b.name or ""):lower()
+        end
+    elseif mode == "Points Desc." then
+        return function(a, b)
+            if (a.points or 0) == (b.points or 0) then
+                return a.percent > b.percent
+            end
+            return (a.points or 0) > (b.points or 0)
+        end
+    elseif mode == "Points Asc." then
+        return function(a, b)
+            if (a.points or 0) == (b.points or 0) then
+                return a.percent > b.percent
+            end
+            return (a.points or 0) < (b.points or 0)
+        end
+    end
+    -- default: Percent Desc
+    return function(a, b)
+        if a.percent == b.percent then
+            return (a.name or ""):lower() < (b.name or ""):lower()
+        end
+        return a.percent > b.percent
+    end
+end
+
 -- Panel creation. We keep the layout similar to original but shift options to modules.
 local function CreateAlmostCompletedPanel()
     if _G[ACA_PANEL_NAME] then return _G[ACA_PANEL_NAME] end
@@ -470,6 +537,9 @@ local function CreateAlmostCompletedPanel()
     local relSide = (ACA_AnchorSide == "LEFT") and "TOPLEFT" or "TOPRIGHT"
     local xOff = (ACA_AnchorSide == "LEFT") and -10 or 10
     panel:SetPoint(side, parent, relSide, xOff, 0)
+    panel._acaBaseX = xOff
+    panel._acaHidden = false
+    if ACA._ApplyPanelStrata then C_Timer.After(0, function() ACA._ApplyPanelStrata(false) end) end
     panel:SetBackdrop({
         bgFile = "Interface\\AchievementFrame\\UI-Achievement-Parchment-Horizontal",
         edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
@@ -493,6 +563,7 @@ local resultsLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall
 resultsLabel:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -12, -14)
 resultsLabel:SetText("")
 resultsLabel:Hide()
+resultsLabel:SetTextColor(1, 1, 1)
 panel.resultsLabel = resultsLabel
 -- ACA_RESULTS_LABEL_PATCH -- end
     tab1:SetText("Almost Completed")
@@ -511,7 +582,7 @@ panel.resultsLabel = resultsLabel
 
     local contentCompleted = CreateFrame("Frame", nil, panel)
     contentCompleted:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -40)
-    contentCompleted:SetSize(396, 390)
+    contentCompleted:SetSize(396, 395)
     local contentIgnored = CreateFrame("Frame", nil, panel)
     contentIgnored:SetPoint("TOPLEFT", panel, "TOPLEFT", 12, -40)
     contentIgnored:SetSize(396, 390)
@@ -578,9 +649,38 @@ function ACA.SyncOptionsUI()
 end
 
 
+    -- NEW: Sort dropdown at top-left of Tab 1
+    do
+        local sortLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal"); panel.sortLabel = sortLabel
+        sortLabel:SetPoint("TOPLEFT", contentCompleted, "TOPLEFT", 0, 10)
+        sortLabel:SetText("Sort by:")
+
+        
+        sortLabel:SetTextColor(1, 1, 1)
+local sortDropdown = CreateFrame("Frame", "ACASortDrop", panel, "UIDropDownMenuTemplate")
+        sortDropdown:SetPoint("TOPLEFT", sortLabel, "BOTTOMLEFT", -10, -4)
+        UIDropDownMenu_SetWidth(sortDropdown, 160)
+        UIDropDownMenu_SetText(sortDropdown, ACA_SortMode or "Percent (Desc)")
+        panel.sortDropdown = sortDropdown
+
+        UIDropDownMenu_Initialize(sortDropdown, function(self, level)
+            local info = UIDropDownMenu_CreateInfo()
+            for _, key in ipairs(ACA.SORT_LIST) do
+                info.text = key
+                info.func = function()
+                    ACA_SortMode = key
+                    UIDropDownMenu_SetText(sortDropdown, key)
+                    if ACA and ACA.UpdatePanel then ACA.UpdatePanel(false) end
+                end
+                info.checked = (ACA_SortMode == key)
+                UIDropDownMenu_AddButton(info)
+            end
+        end)
+    end
+
     local scrollCompleted = CreateFrame("ScrollFrame", nil, contentCompleted, "UIPanelScrollFrameTemplate")
-    scrollCompleted:SetPoint("TOPLEFT", contentCompleted, "TOPLEFT", 0, 0)
-    scrollCompleted:SetPoint("BOTTOMRIGHT", contentCompleted, "BOTTOMRIGHT", -25, 0)
+    scrollCompleted:SetPoint("TOPLEFT", contentCompleted, "TOPLEFT", 0, -33)  -- shifted down to make room for Sort dropdown
+    scrollCompleted:SetPoint("BOTTOMRIGHT", contentCompleted, "BOTTOMRIGHT", -25, -20)
     local childCompleted = CreateFrame("Frame", nil, scrollCompleted)
     childCompleted:SetSize(396, 600)
     scrollCompleted:SetScrollChild(childCompleted)
@@ -597,7 +697,7 @@ end
     -- progress bar, refresh, filter dropdown, slider etc will be manipulated by options module later
     local scanBar = CreateFrame("StatusBar", nil, panel, "TextStatusBar")
     scanBar:SetSize(180, 18)
-    scanBar:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 20, 45)
+    scanBar:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 200, 14)
     scanBar:SetStatusBarTexture("Interface\\TARGETINGFRAME\\UI-StatusBar")
     scanBar:GetStatusBarTexture():SetHorizTile(false)
     scanBar:GetStatusBarTexture():SetVertexColor(0, 0.8, 0.2, 1)
@@ -610,7 +710,9 @@ end
     scanBar.Text = scanBar:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     scanBar.Text:SetPoint("CENTER", scanBar, "CENTER", 0, 0)
     scanBar.Text:SetText("Idle")
-    panel.scanBar = scanBar
+    
+    scanBar.Text:SetTextColor(1, 1, 1)
+panel.scanBar = scanBar
 
     local refresh = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
     refresh:SetSize(100, 24)
@@ -618,6 +720,17 @@ end
     refresh:SetText("Rescan")
     refresh:GetFontString():SetTextColor(1, 1, 1)
     panel.refresh = refresh
+    -- Align scan bar inline with the Rescan button
+    if panel.scanBar then
+        panel.scanBar:ClearAllPoints()
+        panel.scanBar:SetPoint("LEFT", refresh, "RIGHT", 16, 0)
+    end
+    -- Stretch scan bar to the right edge of the achievements list
+    if panel.scanBar and panel.contentCompleted then
+        -- Match the scroll frame right offset (-25) so edges line up
+        panel.scanBar:SetPoint("RIGHT", panel.contentCompleted, "RIGHT", -30, 0)
+    end
+
 
     -- Ensure Clear and Reset buttons exist (same anchor as Rescan)
     if not panel.clearBtn then
@@ -673,7 +786,7 @@ if ACA.CategoryFilters then
             end
             if panel.optionsSlider then
                 panel.optionsSlider:SetValue(ACA_ScanThreshold)
-                panel.optionsSlider.Text:SetText("Scan Threshold: " .. ACA_ScanThreshold .. "%")
+                panel.optionsSlider.Text:SetText("Threshold: " .. ACA_ScanThreshold .. "%")
             end
             print("ACA: all settings reset to default.")
             if ACA.UpdatePanel then ACA.UpdatePanel(true) end
@@ -732,7 +845,7 @@ if ACA.CategoryFilters then
 
     -- reward-filter dropdown label
     local filterLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    filterLabel:SetPoint("BOTTOMLEFT", scanBar, "BOTTOMRIGHT", 16, 10)
+    filterLabel:SetPoint("TOPLEFT", contentCompleted, "TOPLEFT", 190, 10)
     filterLabel:SetText("Filter by:")
     filterLabel:SetTextColor(1, 1, 1)
     panel.filterLabel = filterLabel
@@ -785,6 +898,8 @@ end
             panel.filterDropdown:Show()
             if panel.filterLabel then panel.filterLabel:Show() end
             refresh:Show()
+            if panel.sortDropdown then panel.sortDropdown:Show() end
+            if panel.sortLabel then panel.sortLabel:Show() end
         elseif idx == 2 then
             contentCompleted:Hide(); contentIgnored:Show(); contentOptions:Hide()
             panel.scanBar:Hide()
@@ -794,6 +909,8 @@ end
             panel.filterDropdown:Hide()
             if panel.filterLabel then panel.filterLabel:Hide() end
             refresh:Hide()
+            if panel.sortDropdown then panel.sortDropdown:Hide() end
+            if panel.sortLabel then panel.sortLabel:Hide() end
         else
             contentCompleted:Hide(); contentIgnored:Hide(); contentOptions:Show()
             panel.scanBar:Hide()
@@ -803,6 +920,8 @@ end
             panel.filterDropdown:Hide()
             if panel.filterLabel then panel.filterLabel:Hide() end
             refresh:Hide()
+            if panel.sortDropdown then panel.sortDropdown:Hide() end
+            if panel.sortLabel then panel.sortLabel:Hide() end
         end
     end
     tab1:SetScript("OnClick", function() ShowTab(1); ACA.UpdatePanel(false) end)
@@ -817,11 +936,572 @@ end
 
     -- clear button (for ignored) left to options module
 
+    
+    -- ACA_HIDE_TOGGLE_UI begin
+    if not panel.hideBtn then
+        local btnParent = UIParent
+        local btn = CreateFrame("Button", nil, btnParent, "UIPanelButtonTemplate")
+        btn:SetSize(20, 64)
+        btn:SetFrameStrata((AchievementFrame and AchievementFrame:GetFrameStrata()) or "HIGH")
+        btn.txt = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+        btn.txt:SetPoint("CENTER")
+        btn.txt:SetText((ACA_AnchorSide == "RIGHT") and "‹" or "›")
+        btn:SetScript("OnClick", function() ACA.TogglePanelHidden() end)
+        btn:SetScript("OnEnter", function(self) if ACA and ACA.UpdateHideBtnTooltip then ACA.UpdateHideBtnTooltip(self) end end)
+        btn:SetScript("OnLeave", function() if GameTooltip and GameTooltip:IsOwned(btn) then GameTooltip:Hide() end end)
+        panel.hideBtn = btn
+        ACA.UpdateHideButtonAnchors()
+        if AchievementFrame and AchievementFrame:IsShown() then
+            btn:Show()
+        else
+            btn:Hide()
+        end
+    end
+    -- keep the button aligned if user switches tabs or we reanchor
+    if hooksecurefunc then
+        hooksecurefunc(panel, "SetPoint", function() C_Timer.After(0, function() ACA.UpdateHideButtonAnchors(); if ACA.UpdateHideButtonVisibility then ACA.UpdateHideButtonVisibility() end end) end)
+    end
+    -- ACA_HIDE_TOGGLE_UI end
     panel.ShowTab = ShowTab
     _G[ACA_PANEL_NAME] = panel
     ShowTab(1)
     return panel
 end
+
+-- ACA_HIDE_TOGGLE_HELPERS begin
+do
+
+    function ACA.UpdateHideButtonVisibility()
+        local panel = _G[ACA_PANEL_NAME]
+        if not panel or not panel.hideBtn then return end
+        if AchievementFrame and AchievementFrame:IsShown() then
+            panel.hideBtn:Show()
+        else
+            panel.hideBtn:Hide()
+        end
+    end
+
+    function ACA.UpdateHideBtnTooltip(btn)
+        if not btn or not GameTooltip then return end
+        local panel = _G[ACA_PANEL_NAME]
+        local isHidden = panel and panel._acaHidden
+        GameTooltip:SetOwner(btn, "ANCHOR_RIGHT")
+        if isHidden then
+            GameTooltip:SetText("Show Almost Completed Achievements Panel", 1, 1, 1)
+        else
+            GameTooltip:SetText("Hide Almost Completed Achievements Panel", 1, 1, 1)
+        end
+        GameTooltip:Show()
+    end
+    local function _AnimatePanelX(panel, fromX, toX, duration, onDone)
+        if not panel or not panel:IsShown() then
+            if onDone then onDone() end
+            return
+        end
+        duration = duration or 0.20
+        local elapsed, f = 0, CreateFrame("Frame")
+        f:SetScript("OnUpdate", function(_, dt)
+            elapsed = elapsed + dt
+            local t = elapsed / duration
+            if t >= 1 then t = 1 end
+            local x = fromX + (toX - fromX) * t
+            panel:ClearAllPoints()
+            local side = _G.ACA_AnchorSide == "LEFT"
+                and "TOPRIGHT" or "TOPLEFT"
+            local rel  = _G.ACA_AnchorSide == "LEFT"
+                and "TOPLEFT"  or "TOPRIGHT"
+            local parent = AchievementFrame or UIParent
+            panel:SetPoint(side, parent, rel, x, 0)
+            if t >= 1 then
+                f:SetScript("OnUpdate", nil)
+                f:Hide()
+                if onDone then onDone() end
+            end
+        end)
+        f:Show()
+    end
+
+    function ACA.UpdateHideButtonAnchors()
+        local panel = _G[ACA_PANEL_NAME]
+        if not panel or not panel.hideBtn then return end
+        local btn = panel.hideBtn
+        btn:ClearAllPoints()
+        if not panel._acaHidden then
+            -- Shown: button sits off the outer edge of the ACA panel, centered vertically
+            if _G.ACA_AnchorSide == "RIGHT" then
+                btn:SetPoint("LEFT", panel, "RIGHT", 2, 0)
+            else
+                btn:SetPoint("RIGHT", panel, "LEFT", -2, 0)
+            end
+        else
+            -- Hidden: button sits off the edge of the Blizzard AchievementFrame
+            local parent = AchievementFrame or UIParent
+            if _G.ACA_AnchorSide == "RIGHT" then
+                btn:SetPoint("LEFT", parent, "RIGHT", 2, 0)
+            else
+                btn:SetPoint("RIGHT", parent, "LEFT", -2, 0)
+            end
+        end
+    end
+
+    function ACA.TogglePanelHidden()
+        local panel = _G[ACA_PANEL_NAME]
+        if not panel then return end
+        local parent = AchievementFrame or UIParent
+
+        -- ensure base offsets cached
+        if panel._acaBaseX == nil then
+            panel._acaBaseX = (_G.ACA_AnchorSide == "LEFT") and -10 or 10
+        end
+
+        local width = panel:GetWidth() or 420
+        local tuckX = (_G.ACA_AnchorSide == "RIGHT") and (-width - 20) or (width + 20)
+        local fromX, toX
+
+        if not panel._acaHidden then
+            -- slide toward Blizzard frame then hide
+            fromX, toX = panel._acaBaseX, tuckX
+            ACA._ApplyPanelStrata(true)
+            _AnimatePanelX(panel, fromX, toX, 0.20, function()
+                panel:Hide()
+                panel._acaHidden = true
+                -- flip arrow
+                if panel.hideBtn and panel.hideBtn.txt then
+                    panel.hideBtn.txt:SetText((_G.ACA_AnchorSide == "RIGHT") and "›" or "‹")
+                end
+                ACA.UpdateHideButtonAnchors()
+                if panel.hideBtn and GameTooltip and GameTooltip:IsOwned(panel.hideBtn) and ACA and ACA.UpdateHideBtnTooltip then ACA.UpdateHideBtnTooltip(panel.hideBtn) end
+                if panel.hideBtn and GameTooltip and GameTooltip:IsOwned(panel.hideBtn) and ACA and ACA.UpdateHideBtnTooltip then ACA.UpdateHideBtnTooltip(panel.hideBtn) end
+            end)
+        else
+            -- reveal: start tucked, show, then slide out to base
+            panel:Show()
+            -- Keep below Blizzard during the entire slide-out, restore after
+            if ACA._ApplyPanelStrata then ACA._ApplyPanelStrata(true) end
+            fromX, toX = tuckX, panel._acaBaseX
+            _AnimatePanelX(panel, fromX, toX, 0.20, function()
+                panel._acaHidden = false
+                if ACA._ApplyPanelStrata then ACA._ApplyPanelStrata(false) end
+                if panel.hideBtn and panel.hideBtn.txt then
+                    panel.hideBtn.txt:SetText((_G.ACA_AnchorSide == "RIGHT") and "‹" or "›")
+                end
+                ACA.UpdateHideButtonAnchors()
+            end)
+        end
+    end
+end
+-- ACA_HIDE_TOGGLE_HELPERS end
+
+-- ACA_STRATA_HELPERS begin
+do
+    local ORDER = { BACKGROUND=1, LOW=2, MEDIUM=3, HIGH=4, DIALOG=5, FULLSCREEN=6, FULLSCREEN_DIALOG=7, TOOLTIP=8 }
+    local INDEX = { "BACKGROUND","LOW","MEDIUM","HIGH","DIALOG","FULLSCREEN","FULLSCREEN_DIALOG","TOOLTIP" }
+
+    local function LowerStrata(strata)
+        local i = ORDER[strata or "MEDIUM"] or 3
+        i = math.max(1, i - 1)
+        return INDEX[i]
+    end
+
+    local function ForEachChild(frame, fn)
+        if not frame or not fn then return end
+        fn(frame)
+        if frame.GetChildren then
+            local kids = { frame:GetChildren() }
+            for i = 1, #kids do
+                local child = kids[i]
+                ForEachChild(child, fn)
+            end
+        end
+        -- Regions don't have their own strata; no action needed. Still consume safely.
+        if frame.GetRegions then
+            local regs = { frame:GetRegions() }
+            -- no-op, but avoids generic-for misuse
+        end
+    end
+
+    function ACA._ApplyPanelStrata(hiddenMode)
+        local panel = _G[ACA_PANEL_NAME]
+        if not panel then return end
+        local parent = AchievementFrame or UIParent
+
+        panel._acaOrigStrata = panel._acaOrigStrata or panel:GetFrameStrata() or "MEDIUM"
+        local parentStrata = parent and parent:GetFrameStrata() or "HIGH"
+
+        if hiddenMode then
+            local target = LowerStrata(parentStrata)
+            ForEachChild(panel, function(f) if f.SetFrameStrata then f:SetFrameStrata(target) end end)
+            -- ensure the toggle button stays on top of Blizzard panel edge
+            if panel.hideBtn and panel.hideBtn.SetFrameStrata then
+                panel.hideBtn:SetFrameStrata(parentStrata)
+            end
+        else
+            local restore = panel._acaOrigStrata or "MEDIUM"
+            ForEachChild(panel, function(f) if f.SetFrameStrata then f:SetFrameStrata(restore) end end)
+            if panel.hideBtn and panel.hideBtn.SetFrameStrata and parent then
+                panel.hideBtn:SetFrameStrata(parent:GetFrameStrata() or "HIGH")
+            end
+        end
+    end
+end
+-- ACA_STRATA_HELPERS end
+
+-- === Top 5 Mini Window ======================================================
+
+-- Shared tooltip helpers so Top5 and the main list can use the same behavior.
+
+-- Robust, shared tooltip used by both the main list and the Top 5 window.
+function ACA.ShowAchievementTooltip(owner, achievementID)
+    if not achievementID then return end
+    if UIParentLoadAddOn then UIParentLoadAddOn("Blizzard_AchievementUI") end
+
+    GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
+    GameTooltip:ClearLines()
+
+    local id = achievementID
+    local _, name, points, completed, month, day, year, description, flags, icon, rewardText = GetAchievementInfo(id)
+
+    GameTooltip:AddLine(name or ("[" .. tostring(id) .. "]"), 1, 0.82, 0)
+
+    if points and points > 0 then
+        GameTooltip:AddLine(string.format("%d Achievement Points", points), 1, 1, 1)
+    end
+
+    if completed then
+        if month and day and year and month > 0 then
+            GameTooltip:AddLine(string.format("Completed: %02d/%02d/%d", month, day or 0, year or 0), 0, 1, 0)
+        else
+            GameTooltip:AddLine("Completed", 0, 1, 0)
+        end
+    end
+
+    if rewardText and rewardText ~= "" then
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddLine("Reward", 0.6, 0.8, 1)
+        GameTooltip:AddLine(rewardText, 0.9, 0.9, 0.9, true)
+    end
+
+    if description and description ~= "" then
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddLine(description, 0.9, 0.9, 0.9, true)
+    end
+
+    local numCriteria = GetAchievementNumCriteria(id) or 0
+    if numCriteria and numCriteria > 0 then
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddLine("Criteria", 0.6, 0.8, 1)
+        for i = 1, numCriteria do
+
+    function Top5.ShowRichTooltip(owner, achievementID)
+        if not achievementID then return end
+        if UIParentLoadAddOn then UIParentLoadAddOn("Blizzard_AchievementUI") end
+        GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
+        GameTooltip:ClearLines()
+
+        local id = achievementID
+        local _, name, points, completed, month, day, year, description, flags, icon, rewardText = GetAchievementInfo(id)
+
+        GameTooltip:AddLine(name or ("[" .. tostring(id) .. "]"), 1, 0.82, 0)
+
+        if points and points > 0 then
+            GameTooltip:AddLine(string.format("%d Achievement Points", points), 1, 1, 1)
+        end
+
+        if completed then
+            if month and day and year and month > 0 then
+                GameTooltip:AddLine(string.format("Completed: %02d/%02d/%d", month, day or 0, year or 0), 0, 1, 0)
+            else
+                GameTooltip:AddLine("Completed", 0, 1, 0)
+            end
+        end
+
+        if rewardText and rewardText ~= "" then
+            GameTooltip:AddLine(" ")
+            GameTooltip:AddLine("Reward", 0.6, 0.8, 1)
+            GameTooltip:AddLine(rewardText, 0.9, 0.9, 0.9, true)
+        end
+
+        if description and description ~= "" then
+            GameTooltip:AddLine(" ")
+            GameTooltip:AddLine(description, 0.9, 0.9, 0.9, true)
+        end
+
+        local numCriteria = GetAchievementNumCriteria(id) or 0
+        if numCriteria and numCriteria > 0 then
+            GameTooltip:AddLine(" ")
+            GameTooltip:AddLine("Criteria", 0.6, 0.8, 1)
+            for i = 1, numCriteria do
+                local cDesc, cType, cCompleted, cQuantity, cReqQuantity, cFlags, cAssetID, cQuantityString, cCriteriaID, eligible = GetAchievementCriteriaInfo(id, i)
+                local line = cDesc and cDesc ~= "" and cDesc or (cQuantityString or "Criteria")
+                if cReqQuantity and cReqQuantity > 0 and cQuantity ~= nil then
+                    line = string.format("%s (%d/%d)", line, cQuantity or 0, cReqQuantity or 0)
+                end
+                if cCompleted then
+                    GameTooltip:AddLine(" • " .. line, 0, 1, 0, true)
+                else
+                    GameTooltip:AddLine(" • " .. line, 0.9, 0.9, 0.9, true)
+                end
+            end
+        end
+
+        GameTooltip:Show()
+    end
+            local cDesc, cType, cCompleted, cQuantity, cReqQuantity, cFlags, cAssetID, cQuantityString, cCriteriaID, eligible = GetAchievementCriteriaInfo(id, i)
+            local line = cDesc and cDesc ~= "" and cDesc or (cQuantityString or "Criteria")
+            if cReqQuantity and cReqQuantity > 0 and cQuantity ~= nil then
+                line = string.format("%s (%d/%d)", line, cQuantity or 0, cReqQuantity or 0)
+            end
+            if cCompleted then
+                GameTooltip:AddLine(" • " .. line, 0, 1, 0, true)
+            else
+                GameTooltip:AddLine(" • " .. line, 0.9, 0.9, 0.9, true)
+            end
+        end
+    end
+
+    GameTooltip:Show()
+end
+
+function ACA.HideAchievementTooltip(owner)
+    if GameTooltip and GameTooltip:IsOwned(owner) then GameTooltip:Hide() end
+end
+
+function ACA.TryShowAchievementTooltip(owner, achievementID)
+    if ACA and type(ACA.ShowAchievementTooltip) == 'function' then
+        return ACA.ShowAchievementTooltip(owner, achievementID)
+    end
+end
+
+function ACA.TryHideAchievementTooltip(owner)
+    if ACA and type(ACA.HideAchievementTooltip) == 'function' then
+        return ACA.HideAchievementTooltip(owner)
+    end
+end
+
+
+do
+    local function SafeEnableMouse(frame, enable)
+        if not frame then return end
+        if frame.EnableMouse then frame:EnableMouse(enable and true or false) end
+        if frame.GetChildren then
+            for _, child in ipairs({ frame:GetChildren() }) do
+                SafeEnableMouse(child, enable)
+            end
+        end
+    end
+
+    local function _RestorePosition(f)
+        local db = _G.ACA_Top5DB or {}
+        if db.point and type(db.point) == "table" then
+            f:ClearAllPoints()
+            f:SetPoint(db.point[1], db.point[2] or UIParent, db.point[3], db.point[4] or 0, db.point[5] or 0)
+        else
+            f:ClearAllPoints()
+            f:SetPoint("CENTER", UIParent, "CENTER", 0, 120)
+        end
+    end
+
+    local function _SavePosition(f)
+        local a1, r, a2, x, y = f:GetPoint(1)
+        _G.ACA_Top5DB = _G.ACA_Top5DB or {}
+        _G.ACA_Top5DB.point = { a1 or "CENTER", r or UIParent, a2 or "CENTER", x or 0, y or 0 }
+    end
+
+    local function _MakeRow(parent)
+        local btn = CreateFrame("Button", nil, parent, "BackdropTemplate")
+        btn:SetSize(260, 22)
+        btn.bg = btn:CreateTexture(nil, "BACKGROUND")
+        btn.bg:SetAllPoints()
+        btn.bg:SetColorTexture(0, 0, 0, 0.25)
+        btn.hl = btn:CreateTexture(nil, "HIGHLIGHT")
+        btn.hl:SetAllPoints()
+        btn.hl:SetTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
+        btn.hl:SetBlendMode("ADD")
+        btn.hl:SetAlpha(0.25)
+
+        btn.Title = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        btn.Title:SetPoint("LEFT", btn, "LEFT", 8, 0)
+        btn.Title:SetJustifyH("LEFT")
+        btn.Title:SetWidth(200)
+
+        btn.Pct = btn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        btn.Pct:SetPoint("RIGHT", btn, "RIGHT", -6, 0)
+        btn.Pct:SetJustifyH("RIGHT")
+        btn.Pct:SetWidth(40)
+
+        return btn
+    end
+
+    local Top5 = CreateFrame("Frame", "ACA_Top5Window", UIParent, "BackdropTemplate")
+    Top5:SetSize(280, 5 + (22 * 5) + 5 + 22) -- rows + paddings + header
+    Top5:SetBackdrop({
+        bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = false, edgeSize = 12,
+        insets = { left = 3, right = 3, top = 3, bottom = 3 }
+    })
+    Top5:SetBackdropBorderColor(0.35, 0.35, 0.35)
+    _RestorePosition(Top5)
+    Top5:SetMovable(true)
+    Top5:EnableMouse(true)
+    Top5:RegisterForDrag("LeftButton")
+    Top5:SetScript("OnDragStart", function(self)
+        if not _G.ACA_Top5DB.locked then self:StartMoving() end
+    end)
+    Top5:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        _SavePosition(self)
+    end)
+    Top5:Hide()
+
+    -- Header
+    Top5.Header = Top5:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    Top5.Header:SetPoint("TOP", Top5, "TOP", 0, -6)
+    Top5.Header:SetText("ACA: Top 5")
+
+    -- Rows
+    Top5.rows = {}
+    for i = 1, 5 do
+        local row = _MakeRow(Top5)
+        row:SetPoint("TOPLEFT", Top5, "TOPLEFT", 10, - (6 + 20 + ((i - 1) * 22)))
+        row:SetPoint("TOPRIGHT", Top5, "TOPRIGHT", -10, - (6 + 20 + ((i - 1) * 22)))
+        Top5.rows[i] = row
+
+        row:SetScript("OnEnter", function(self)
+    local id = self._id
+    if not id then return end
+    if UIParentLoadAddOn then UIParentLoadAddOn("Blizzard_AchievementUI") end
+    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+    GameTooltip:ClearLines()
+    local _, name, points, completed, month, day, year, description, flags, icon, rewardText = GetAchievementInfo(id)
+    GameTooltip:AddLine(name or ("[" .. tostring(id) .. "]"), 1, 0.82, 0)
+    if points and points > 0 then
+        GameTooltip:AddLine(string.format("%d Achievement Points", points), 1, 1, 1)
+    end
+    if completed then
+        if month and day and year and month > 0 then
+            GameTooltip:AddLine(string.format("Completed: %02d/%02d/%d", month, day or 0, year or 0), 0, 1, 0)
+        else
+            GameTooltip:AddLine("Completed", 0, 1, 0)
+        end
+    end
+    if rewardText and rewardText ~= "" then
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddLine("Reward", 0.6, 0.8, 1)
+        GameTooltip:AddLine(rewardText, 0.9, 0.9, 0.9, true)
+    end
+    if description and description ~= "" then
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddLine(description, 0.9, 0.9, 0.9, true)
+    end
+    local numCriteria = GetAchievementNumCriteria(id) or 0
+    if numCriteria and numCriteria > 0 then
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddLine("Criteria", 0.6, 0.8, 1)
+        for i = 1, numCriteria do
+            local cDesc, cType, cCompleted, cQuantity, cReqQuantity, cFlags, cAssetID, cQuantityString, cCriteriaID, eligible = GetAchievementCriteriaInfo(id, i)
+            local line = (cDesc and cDesc ~= "" and cDesc) or (cQuantityString or "Criteria")
+            if cReqQuantity and cReqQuantity > 0 and cQuantity ~= nil then
+                line = string.format("%s (%d/%d)", line, cQuantity or 0, cReqQuantity or 0)
+            end
+            if cCompleted then
+                GameTooltip:AddLine(" • " .. line, 0, 1, 0, true)
+            else
+                GameTooltip:AddLine(" • " .. line, 0.9, 0.9, 0.9, true)
+            end
+        end
+    end
+    GameTooltip:Show()
+end)
+        row:SetScript("OnLeave", function(self)
+    if GameTooltip and GameTooltip:IsOwned(self) then GameTooltip:Hide() end
+end)
+
+        row:RegisterForClicks("AnyUp")
+        row:SetScript("OnClick", function(self, button)
+            local id = self._id
+            if not id then return end
+            if button == "LeftButton" and IsShiftKeyDown() then
+    if AddTrackedAchievement and RemoveTrackedAchievement and IsTrackedAchievement then
+        if IsTrackedAchievement(id) then RemoveTrackedAchievement(id) else AddTrackedAchievement(id) end
+    elseif AddTrackedAchievement then
+        AddTrackedAchievement(id)
+    end
+    return
+end
+                if button == "LeftButton" and not IsShiftKeyDown() then
+                    if not AchievementFrame or not AchievementFrame_IsVisible then
+                        if UIParentLoadAddOn then UIParentLoadAddOn("Blizzard_AchievementUI") end
+                    end
+                    local AF = _G["AchievementFrame"]
+                    if AF then AF:Show() end
+                    C_Timer.After(0, function()
+                        local selectFn = _G["AchievementFrame_SelectAchievement"]
+                        if type(selectFn) == "function" then selectFn(id) end
+                    end)
+                end
+        end)
+    end
+
+    function ACA.Top5_Toggle()
+        _G.ACA_Top5DB = _G.ACA_Top5DB or {}
+        _G.ACA_Top5DB.shown = not not (not Top5:IsShown())
+        if _G.ACA_Top5DB.shown then Top5:Show() else Top5:Hide() end
+    end
+
+    function ACA.Top5_Show(show)
+        _G.ACA_Top5DB = _G.ACA_Top5DB or {}
+        _G.ACA_Top5DB.shown = not not show
+        if show then Top5:Show() else Top5:Hide() end
+    end
+
+    function ACA.Top5_SetLocked(locked)
+        _G.ACA_Top5DB = _G.ACA_Top5DB or {}
+        _G.ACA_Top5DB.locked = not not locked
+    end
+
+    function ACA.Top5_SetClickThrough(ct)
+        _G.ACA_Top5DB = _G.ACA_Top5DB or {}
+        _G.ACA_Top5DB.clickThrough = not not ct
+        SafeEnableMouse(Top5, not ct)
+    end
+
+    function ACA.Top5_Update(list)
+        if not Top5 or not Top5.rows then return end
+        local Utils = ACA and ACA.Utils
+        for i = 1, 5 do
+            local row = Top5.rows[i]
+            local data = list and list[i]
+            if data then
+                row._id = data.id
+                local nm = data.name or ("[" .. tostring(data.id) .. "]")
+                if Utils and Utils.TruncateString then
+                    nm = Utils.TruncateString(nm, 32)
+                end
+                row.Title:SetText(nm)
+                row.Pct:SetText(string.format("%.0f%%", data.percent or 0))
+                row:Show()
+            else
+                row._id = nil
+                row.Title:SetText("")
+                row.Pct:SetText("")
+                row:Hide()
+            end
+        end
+    end
+
+    -- On init, reflect saved state
+    C_Timer.After(0.2, function()
+        ACA.Top5_SetLocked(_G.ACA_Top5DB and _G.ACA_Top5DB.locked)
+        ACA.Top5_SetClickThrough(_G.ACA_Top5DB and _G.ACA_Top5DB.clickThrough)
+        if _G.ACA_Top5DB and _G.ACA_Top5DB.shown then Top5:Show() end
+    end)
+end
+-- === End Top 5 Mini Window ==================================================
+
+
+
+
 
 -- reward filters (same list)
 local function sanitizeReward(r)
@@ -960,8 +1640,20 @@ local completedChild, ignoredChild = panel.childCompleted, panel.childIgnored
                 if not hidden then table.insert(filtered, v) end
             end
         end
-        sort(filtered, function(a, b) return a.percent > b.percent end)
-        local parentFrame = ACA.UI and (ACA.UI.ResultsFrame or ACA.UI.ScrollChild or ACA.UI.ScrollFrame) or completedChild
+        -- NEW: apply sort mode
+
+
+        sort(filtered, _getComparator(ACA_SortMode or "Percent Desc."))
+
+        
+
+        -- Update the Top 5 pop-out window to mirror current filters/sort (after sort)
+        if ACA and ACA.Top5_Update then
+            local preview = {}
+            for i = 1, math.min(5, #filtered) do preview[i] = filtered[i] end
+            ACA.Top5_Update(preview)
+        end
+local parentFrame = ACA.UI and (ACA.UI.ResultsFrame or ACA.UI.ScrollChild or ACA.UI.ScrollFrame) or completedChild
         if #filtered == 0 then
             if parentFrame and ACA.ShowEmptyResultsMessage then ACA.ShowEmptyResultsMessage(parentFrame) end
             completedChild:SetHeight(200)
@@ -1054,6 +1746,7 @@ loader:SetScript("OnEvent", function(self, event, arg1)
         ACA_FilterMode      = ACA_FilterMode or "All"
         ACA_AnchorSide      = ACA_AnchorSide or "RIGHT"
         ACA_ParseSpeed      = ACA_ParseSpeed or "Auto"
+        ACA_SortMode        = ACA_SortMode or "Percent Desc."
         CreateAlmostCompletedPanel()
         C_Timer.After(0, function() if ACA.MaybeApplyRemixAfterInit then ACA.MaybeApplyRemixAfterInit() end end)
     elseif event == "ADDON_LOADED" and arg1 == "Blizzard_AchievementUI" then
@@ -1064,7 +1757,14 @@ loader:SetScript("OnEvent", function(self, event, arg1)
                 if p.ShowTab then p.ShowTab(1) else PanelTemplates_SetTab(p, 1) end
                 ACA.UpdatePanel(false)
             end
+        
+            if ACA.UpdateHideButtonVisibility then ACA.UpdateHideButtonVisibility() end
+        AchievementFrame:HookScript("OnHide", function()
+            local p = _G[ACA_PANEL_NAME]
+            if p and p.hideBtn then p.hideBtn:Hide() end
         end)
+        end)
+
     end
 end)
 
@@ -1098,6 +1798,9 @@ local function SlashCmd(msg)
         local p = CreateAlmostCompletedPanel()
         if ACA.MaybeApplyRemixAfterInit then ACA.MaybeApplyRemixAfterInit() end
         if p then p:Show(); ACA.UpdatePanel(false) end
+        if ACA.UpdateHideButtonVisibility then ACA.UpdateHideButtonVisibility() end
+                if ACA.UpdateHideButtonAnchors then ACA.UpdateHideButtonAnchors() end
+                if ACA._ApplyPanelStrata then ACA._ApplyPanelStrata(_G[ACA_PANEL_NAME] and _G[ACA_PANEL_NAME]._acaHidden) end
         return
     end
 
@@ -1111,7 +1814,7 @@ local function SlashCmd(msg)
         local panel = _G[ACA_PANEL_NAME]
         if panel and panel.optionsSlider then
             panel.optionsSlider:SetValue(ACA_ScanThreshold)
-            panel.optionsSlider.Text:SetText("Scan Threshold: " .. ACA_ScanThreshold .. "%")
+            panel.optionsSlider.Text:SetText("Threshold: " .. ACA_ScanThreshold .. "%")
         end
         print("ACA: all settings reset to default (ignore list preserved).")
         -- Anchor: default RIGHT
