@@ -1,11 +1,12 @@
 ## Interface: 50501, 50502
 ## Title: Almost Completed Achievements (Classic)
 ## Notes: Lists near-complete achievements and lets you filter by category.
-## Version: 2.5
+## Version: 2.7
 ## Author: Schutey & Kagrok
 ## IconTexture: Interface\AddOns\AlmostCompletedAchievements\Media\icon.png
 
-## SavedVariablesPerCharacter: ACA_CatFilterDB, ACA_Cache, ACA_IgnoreList, ACA_ScanThreshold, ACA_FilterMode, ACA_AnchorSide, ACA_ParseSpeed
+## SavedVariablesPerCharacter: ACA_CatFilterDB, ACA_Cache, ACA_IgnoreList, ACA_ScanThreshold, ACA_FilterMode, ACA_AnchorSide, ACA_ParseSpeed, ACA_SortMode, ACA_PanelHidden, ACA_ExpFilterDB, ACA_Top5DB
+
 
 core.lua
 utils.lua
