@@ -1,4 +1,4 @@
-## Interface: 110205
+## Interface: 110207, 120000
 ## Title: AlmostCompletedAchievements
 ## Notes: Lists near-complete achievements and lets you filter by category.
 ## Version: 2.7
@@ -12,3 +12,4 @@ core.lua
 utils.lua
 categories.lua
 options.lua
+
