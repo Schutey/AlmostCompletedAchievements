@@ -1,7 +1,7 @@
 ## Interface: 110207, 120000
 ## Title: AlmostCompletedAchievements
 ## Notes: Lists near-complete achievements and lets you filter by category.
-## Version: 2.7
+## Version: 2.7.1
 ## Author: Schutey & Kagrok
 ## IconTexture: Interface\AddOns\AlmostCompletedAchievements\Media\icon.png
 
@@ -12,4 +12,5 @@ core.lua
 utils.lua
 categories.lua
 options.lua
+
 
